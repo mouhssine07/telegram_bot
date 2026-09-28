@@ -1,0 +1,14 @@
+.env*
+!.env.template
+products.json
+products.json.tmp
+*.sqlite3*
+*.db
+*.db-*
+*.log
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.codex/
+.agents/
