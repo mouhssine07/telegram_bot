@@ -117,8 +117,38 @@ class Panel:
             self.send(chat_id, "This order was deleted. Open /admin for current orders.")
             return
         current = self.db.execute("SELECT * FROM orders WHERE admin_key=?", (key,)).fetchone()
-        self.send(chat_id, ("Status updated.\n\n" if changed else "This button is outdated or already applied. Current order:\n\n")
+        notice = "Status updated.\n\n" if changed else "This button is outdated or already applied. Current order:\n\n"
+        if changed and status == "confirmed":
+            try:
+                self.send(current["chat_id"],
+                          f"✅ تم تأكيد طلبك #{current['id']}\n"
+                          "شكرًا لاختيارك LuxeVista. سنتواصل معك بخصوص التوصيل.\n\n"
+                          f"✅ Your order #{current['id']} is confirmed\n"
+                          "Thank you for choosing LuxeVista. We will contact you about delivery.\n\n"
+                          f"{current['product_name']} × {current['quantity']}\n"
+                          f"المجموع بدون التوصيل | Total excluding delivery: "
+                          f"{current['unit_price_dh'] * current['quantity']} DH\n\n"
+                          "لمتابعة طلبك | View your order: /orders")
+                notice = "Status updated. Arabic/English confirmation sent to the customer.\n\n"
+            except RuntimeError:
+                notice = ("Status updated, but the customer confirmation could not be delivered. "
+                          "Contact the customer directly; the order remains confirmed.\n\n")
+        self.send(chat_id, notice
                   + self.order_message(current), order_buttons(self.db, current))
+
+    def confirm_order(self, chat_id, parts):
+        if (len(parts) != 2 or not re.fullmatch(r"[1-9][0-9]{0,18}", parts[1])
+                or int(parts[1]) > 9223372036854775807):
+            self.send(chat_id, "Usage: /confirm ORDER_NUMBER\nExample: /confirm 2\nUse /orders to check current order numbers.")
+            return
+        order = self.db.execute("SELECT * FROM orders WHERE id=?", (int(parts[1]),)).fetchone()
+        if not order:
+            self.send(chat_id, "Order not found. Use /orders to check current order numbers.")
+            return
+        # Legacy rows may not have acquired their permanent button reference yet.
+        order_buttons(self.db, order)
+        order = self.db.execute("SELECT * FROM orders WHERE id=?", (order["id"],)).fetchone()
+        self.change_status(chat_id, order["admin_key"], order["status_version"], "confirmed")
 
     def sales(self, chat_id, period="all"):
         where = {"all": "", "today": " WHERE created_at>=datetime('now','start of day')",
@@ -260,12 +290,14 @@ class Panel:
 
     def command(self, chat_id, raw):
         parts = raw.split()
-        if not parts or parts[0] not in ("/admin", "/sales", "/products", "/addproduct", "/team"):
+        if not parts or parts[0] not in ("/admin", "/sales", "/products", "/addproduct", "/team", "/confirm"):
             return False
         if not self.allowed(chat_id):
             return True
         clear_editor(self.db, chat_id)
-        if parts[0] == "/team":
+        if parts[0] == "/confirm":
+            self.confirm_order(chat_id, parts)
+        elif parts[0] == "/team":
             self.team(chat_id, parts)
         elif parts[0] == "/admin" and len(parts) == 1:
             self.home(chat_id)

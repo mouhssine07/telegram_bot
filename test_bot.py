@@ -68,6 +68,24 @@ class BotTestCase(unittest.TestCase):
 
 
 class OrderFlowTests(BotTestCase):
+    def test_modern_caption_uses_current_price_and_valid_emoji_entity_offsets(self):
+        product = {"sku": "p0001", "name": "⌚ ساعة", "price_dh": 150,
+                   "description": "⌚ ساعة — ذهبية ✨ ---- 120 درهم"}
+        caption, entities = self.bot.product_post_caption(product, "TestBot", "channel", album=True)
+        self.assertEqual(caption.count("⌚ ساعة"), 1)
+        self.assertIn("ذهبية ✨", caption)
+        self.assertIn("150 DH", caption)
+        self.assertNotIn("120", caption)
+        self.assertIn("LUXEVISTA", caption)
+        encoded = caption.encode("utf-16-le")
+        labels = [encoded[e["offset"] * 2:(e["offset"] + e["length"]) * 2].decode("utf-16-le") for e in entities]
+        self.assertIn("⌚ ساعة", labels)
+        self.assertEqual(labels[-1], "🛍 اطلب الآن | Order now")
+        self.assertEqual(entities[-1]["url"], "https://t.me/TestBot?start=p_p0001_channel")
+        product["description"] = "✨" * 950
+        with self.assertRaisesRegex(RuntimeError, "too long"):
+            self.bot.product_post_caption(product, "TestBot", "channel", album=True)
+
     def test_customers_only_see_their_own_orders_including_older_pages(self):
         for _ in range(12):
             self.insert_order(101, "Customer X")
@@ -498,6 +516,10 @@ class NotificationTests(BotTestCase):
         self.bot.handle_text(message, self.products, self.db, "TestBot")
         self.assertEqual(self.db.execute("SELECT count(*) FROM notification_jobs").fetchone()[0], 1)
         copies = [data for method, data in self.calls if method == "copyMessage"]
+        self.assertEqual(copies[-1]["message_id"], 5)
+        self.assertIn("LUXEVISTA", copies[-1]["caption"])
+        self.assertEqual(copies[0]["caption"], copies[-1]["caption"])
+        self.assertTrue(json.loads(copies[-1]["caption_entities"]))
         self.assertIn("url", json.loads(copies[-1]["reply_markup"])["inline_keyboard"][0][0])
 
     def test_album_publish_keeps_album_flow_and_queues_arrival(self):
@@ -519,6 +541,10 @@ class NotificationTests(BotTestCase):
         self.assertEqual(self.db.execute("SELECT count(*) FROM notification_jobs").fetchone()[0], 1)
         media = json.loads(next(data["media"] for method, data in self.calls if method == "sendMediaGroup"))
         self.assertEqual(len(media), 2)
+        self.assertEqual([item["media"] for item in media], ["photo-5", "photo-6"])
+        self.assertTrue(all(item["type"] == "photo" for item in media))
+        self.assertNotIn("caption", media[1])
+        self.assertIn("LUXEVISTA", media[0]["caption"])
         self.assertEqual(media[0]["caption_entities"][-1]["type"], "text_link")
         self.assertFalse(any(method == "sendMessage" and data["chat_id"] == "@testchannel" for method, data in self.calls))
 

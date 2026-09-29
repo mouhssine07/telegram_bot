@@ -8,6 +8,49 @@ from test_bot import BotTestCase
 
 
 class AdminPanelTests(BotTestCase):
+    def test_confirm_command_notifies_only_customer_once_in_both_languages(self):
+        self.insert_order(101, "Customer X")
+        self.insert_order(202, "Customer Y")
+        self.text(999, "/confirm 1")
+        self.text(999, "/confirm 1")
+        messages = [data for method, data in self.calls if method == "sendMessage" and data["chat_id"] == 101]
+        self.assertEqual(len(messages), 1)
+        self.assertIn("تم تأكيد طلبك #1", messages[0]["text"])
+        self.assertIn("Your order #1 is confirmed", messages[0]["text"])
+        self.assertFalse(any(data.get("chat_id") == 202 for method, data in self.calls))
+        self.assertEqual(self.db.execute("SELECT count(*) FROM order_status_history").fetchone()[0], 1)
+
+    def test_confirm_button_notifies_once_and_stale_button_does_not_notify(self):
+        self.insert_order(101, "Customer X")
+        action = self.status_button(1, "confirmed")
+        self.callback(999, action, 50)
+        self.callback(999, action, 50)
+        self.assertEqual(sum(data.get("chat_id") == 101 for method, data in self.calls), 1)
+
+    def test_confirm_permissions_invalid_arguments_and_team_access(self):
+        self.insert_order(101, "Customer X")
+        self.text(101, "/confirm 1")
+        for command in ["/confirm", "/confirm -1", "/confirm 0", "/confirm 99", "/confirm 1 2",
+                        "/confirm 9999999999999999999"]:
+            self.text(999, command)
+        self.bot.handle_text({"chat": {"id": 999, "type": "group"}, "message_id": 20,
+                              "text": "/confirm 1"}, self.products, self.db, "TestBot")
+        self.assertEqual(self.db.execute("SELECT status FROM orders").fetchone()[0], "new")
+        self.text(999, "/team add 777")
+        self.text(777, "/confirm 1")
+        self.assertEqual(self.db.execute("SELECT status FROM orders").fetchone()[0], "confirmed")
+
+    def test_failed_customer_confirmation_keeps_status_and_informs_admin(self):
+        self.insert_order(101, "Customer X")
+        def failing_api(method, data=None, timeout=15):
+            if method == "sendMessage" and data["chat_id"] == 101:
+                raise RuntimeError("Customer blocked bot")
+            return self.api(method, data, timeout)
+        self.bot.api = failing_api
+        self.text(999, "/confirm 1")
+        self.assertEqual(self.db.execute("SELECT status FROM orders").fetchone()[0], "confirmed")
+        self.assertIn("could not be delivered", self.sent_text())
+
     def status_button(self, order_id, status):
         order = self.db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
         return next(callback for row in self.bot.admin.order_buttons(self.db, order)

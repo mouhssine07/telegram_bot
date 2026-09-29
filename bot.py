@@ -93,19 +93,44 @@ def order_link_keyboard(bot_username: str, sku: str, source: str) -> str:
     return json.dumps({"inline_keyboard": [[{"text": "🛒 Order now | اطلب الآن", "url": url}]]}, ensure_ascii=False)
 
 
-def album_caption_with_order_link(caption: str, caption_entities: str | None,
-                                  bot_username: str, sku: str, source: str) -> tuple[str, list[dict]]:
-    label = "【 🛒 اطلب الآن | ORDER NOW 】\n     ━━━━━━━━━━━"
-    suffix = "\n\n" + label
-    if len(caption) + len(suffix) > 1024:
-        raise RuntimeError("The album description is too long to add the order link. Shorten the caption and send the album again.")
-    entities = json.loads(caption_entities) if caption_entities else []
-    offset = len((caption + "\n\n").encode("utf-16-le")) // 2
-    length = len(label.encode("utf-16-le")) // 2
-    entities.append({"type": "bold", "offset": offset, "length": length})
-    entities.append({"type": "text_link", "offset": offset, "length": length,
-                     "url": f"https://t.me/{bot_username}?start=p_{sku}_{source}"})
-    return caption + suffix, entities
+def product_post_caption(product: dict, bot_username: str, source: str,
+                         album: bool = False) -> tuple[str, list[dict]]:
+    """One caption design for previews and publications; media stays untouched."""
+    caption = ""
+    entities = []
+
+    def append(text, kind=None, **extra):
+        nonlocal caption
+        if kind:
+            entities.append({"type": kind, "offset": len(caption.encode("utf-16-le")) // 2,
+                             "length": len(text.encode("utf-16-le")) // 2, **extra})
+        caption += text
+
+    description = product.get("description", "").strip()
+    if description.startswith(product["name"]):
+        description = description[len(product["name"]):].lstrip(" \n—–|-:")
+    # Imported descriptions include their price; the catalog price is authoritative.
+    description = PRICE_PATTERN.sub("", description)
+    description = "\n".join(line.strip(" —–|-:") for line in description.splitlines()
+                            if line.strip(" —–|-:"))
+    append("LUXEVISTA", "bold")
+    append("\n────────────────\n\n")
+    append(product["name"], "bold")
+    if description:
+        append("\n\n" + description)
+    append("\n\n")
+    append(f"{product['price_dh']} DH", "bold")
+    append("  ·  للوحدة | per item\n\n")
+    append("رسوم التوصيل تُؤكد عند الطلب\nDelivery fee confirmed when ordering", "italic")
+    append("\n\n────────────────\n")
+    label = "🛍 اطلب الآن | Order now"
+    append(label, "bold")
+    if album:
+        entities.append({**entities[-1], "type": "text_link",
+                         "url": f"https://t.me/{bot_username}?start=p_{product['sku']}_{source}"})
+    if len(caption.encode("utf-16-le")) // 2 > 1024:
+        raise RuntimeError("Product caption is too long for the new layout. Shorten its description in /products and preview again.")
+    return caption, entities
 
 
 def send(chat_id: int | str, text: str, rows=None) -> dict:
@@ -346,9 +371,8 @@ def publish_album(chat_id: int, media_group_id: str, sku: str, is_publish: bool,
         if prior:
             send(chat_id, "This album was already published. Check the channel before posting it again.")
             return
-    caption, entities = album_caption_with_order_link(
-        caption_row["caption"], caption_row["caption_entities"], bot_username, sku,
-        "channel" if is_publish else "preview")
+    caption, entities = product_post_caption(
+        products[sku], bot_username, "channel" if is_publish else "preview", album=True)
     media = [{"type": "photo", "media": row["file_id"]} for row in rows]
     media[0]["caption"] = caption
     media[0]["caption_entities"] = entities
@@ -523,10 +547,14 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
                 send(chat_id, f"Already published this post as channel message #{prior['channel_message_id']}.")
                 return
         try:
+            caption, entities = product_post_caption(
+                products[sku], bot_username, "channel" if is_publish else "preview")
             result = api("copyMessage", {
                 "chat_id": destination,
                 "from_chat_id": chat_id,
                 "message_id": source_id,
+                "caption": caption,
+                "caption_entities": json.dumps(entities, ensure_ascii=False),
                 "reply_markup": order_link_keyboard(bot_username, sku, "channel" if is_publish else "preview"),
             })
         except RuntimeError as exc:
