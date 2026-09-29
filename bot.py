@@ -45,6 +45,9 @@ ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "").strip()
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "").strip()
 PRODUCTS_PATH = Path(os.environ.get("PRODUCTS_PATH", ROOT / "products.json"))
 SOURCE_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,24}$")
+MIN_QUANTITY = 10
+DETAIL_FIELDS = {"name": "الاسم الكامل", "phone": "رقم الهاتف", "city": "المدينة",
+                 "address": "العنوان الكامل للتوصيل"}
 PRICE_PATTERN = re.compile(
     r"(?<![\d.,])([0-9]{1,6})(?:[.,]([0-9]{1,2}))?\s*"
     r"(?:dhs?|mad|درهم|دراهم|د\.?م\.?)\b", re.IGNORECASE,
@@ -119,9 +122,12 @@ def product_post_caption(product: dict, bot_username: str, source: str,
     if description:
         append("\n\n" + description)
     append("\n\n")
+    append("🟨  ")
     append(f"{product['price_dh']} DH", "bold")
-    append("  ·  للوحدة | per item\n\n")
-    append("رسوم التوصيل تُؤكد عند الطلب\nDelivery fee confirmed when ordering", "italic")
+    entities.append({**entities[-1], "type": "text_link",
+                     "url": f"https://t.me/{bot_username}?start=p_{product['sku']}_{source}"})
+    append("  ·  للوحدة | per item\n")
+    append("الحد الأدنى: 10 قطع | Minimum: 10 pieces", "italic")
     append("\n\n────────────────\n")
     label = "🛍 اطلب الآن | Order now"
     append(label, "bold")
@@ -324,8 +330,51 @@ def panel(products: dict, db: sqlite3.Connection) -> admin.Panel:
     return admin.Panel(db, products, ADMIN_CHAT_ID, send, order_message, save_products)
 
 
-def show_product(chat_id: int, product: dict, db: sqlite3.Connection, source: str = "channel") -> None:
+def send_product_photos(chat_id: int, product: dict, db: sqlite3.Connection) -> None:
+    """Reuse recorded product media, keeping albums intact and photos in chat history."""
     sku = product["sku"]
+    album = db.execute("SELECT * FROM published_albums WHERE sku=? ORDER BY rowid DESC LIMIT 1", (sku,)).fetchone()
+    if not album:
+        album = db.execute("SELECT * FROM album_imports WHERE sku=? ORDER BY rowid DESC LIMIT 1", (sku,)).fetchone()
+    if album:
+        photos = db.execute("""SELECT file_id FROM album_items
+            WHERE source_chat_id=? AND media_group_id=? ORDER BY source_message_id""",
+            (album["source_chat_id"], album["media_group_id"])).fetchall()
+        try:
+            if 2 <= len(photos) <= 10 and all(row["file_id"] for row in photos):
+                media = [{"type": "photo", "media": row["file_id"]} for row in photos]
+                media[0]["caption"] = product["name"]
+                api("sendMediaGroup", {"chat_id": chat_id, "media": json.dumps(media, ensure_ascii=False)}, timeout=35)
+                return
+            if "copied_message_ids" in album.keys():
+                result = api("copyMessages", {"chat_id": chat_id, "from_chat_id": album["target_chat_id"],
+                    "message_ids": json.dumps(sorted(json.loads(album["copied_message_ids"]))), "remove_caption": "true"})
+                if result:
+                    return
+        except RuntimeError:
+            # A media failure must not prevent viewing the product or ordering it.
+            send(chat_id, "تعذّر عرض صور المنتج حاليًا. يمكنك مراجعتها في منشور القناة والمتابعة أدناه.")
+            return
+    post = db.execute("SELECT * FROM published_posts WHERE sku=? ORDER BY rowid DESC LIMIT 1", (sku,)).fetchone()
+    original = db.execute("""SELECT s.* FROM source_imports s WHERE s.sku=? AND NOT EXISTS (
+        SELECT 1 FROM album_items a WHERE a.source_chat_id=s.source_chat_id
+        AND a.source_message_id=s.source_message_id) ORDER BY s.rowid DESC LIMIT 1""", (sku,)).fetchone()
+    if not post and not original:
+        return
+    try:
+        api("copyMessage", {"chat_id": chat_id,
+            "from_chat_id": post["target_chat_id"] if post else original["source_chat_id"],
+            "message_id": post["channel_message_id"] if post else original["source_message_id"],
+            "caption": product["name"], "reply_markup": json.dumps({"inline_keyboard": []})})
+    except RuntimeError:
+        send(chat_id, "تعذّر عرض صورة المنتج حاليًا. يمكنك مراجعتها في منشور القناة والمتابعة أدناه.")
+
+
+def show_product(chat_id: int, product: dict, db: sqlite3.Connection, source: str = "channel",
+                 include_photos: bool = False) -> None:
+    sku = product["sku"]
+    if include_photos:
+        send_product_photos(chat_id, product, db)
     unavailable = shop.stock(db, sku) == 0
     buttons = [[("🔔 Notify me when available | أخبرني عند التوفر", f"restock:{sku}")]] if unavailable else [
         [("🛒 اطلب الآن", f"order:{sku}:{source}")]]
@@ -345,7 +394,7 @@ def start(chat_id: int, payload: str, products: dict, db: sqlite3.Connection) ->
             if remainder == sku or remainder.startswith(sku + "_"):
                 source = remainder[len(sku) + 1:] if remainder != sku else "channel"
                 if SOURCE_PATTERN.fullmatch(source):
-                    show_product(chat_id, products[sku], db, source)
+                    show_product(chat_id, products[sku], db, source, include_photos=True)
                     return
     send_order(db, chat_id, "مرحبا 👋 اختر المنتج:\nللاشتراك في تنبيهات الجديد: /notifications",
          [[(f"{p['name']} — {p['price_dh']} DH", f"view:{p['sku']}")] for p in products.values()])
@@ -608,40 +657,64 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
         send_order(db, chat_id, "أدخل قيمة صحيحة (حتى 150 حرفًا). أو اكتب /cancel.")
         return
     if step == "quantity":
-        if not value.isascii() or not value.isdigit() or not 1 <= int(value) <= 1000:
-            send_order(db, chat_id, "أدخل الكمية بالأرقام من 1 إلى 1000.")
+        if not value.isascii() or not value.isdigit() or not MIN_QUANTITY <= int(value) <= 1000:
+            send_order(db, chat_id, "الحد الأدنى للطلب 10 قطع. أدخل الكمية من 10 إلى 1000.")
             return
         if not check_stock(chat_id, data["sku"], int(value), products, db):
             return
         data["quantity"] = int(value)
-        put_session(db, chat_id, "name", data)
-        send_order(db, chat_id, "الاسم الكامل؟")
-    elif step == "name":
-        data["name"] = value
-        put_session(db, chat_id, "phone", data)
-        send_order(db, chat_id, "رقم الهاتف؟")
-    elif step == "phone":
-        phone = re.sub(r"[\s().-]", "", value)
-        if not re.fullmatch(r"\+?[0-9]{9,15}", phone):
-            send_order(db, chat_id, "أدخل رقم هاتف صحيحًا، مثل 0612345678 أو +212612345678.")
-            return
-        data["phone"] = phone
-        put_session(db, chat_id, "city", data)
-        send_order(db, chat_id, "المدينة؟")
-    elif step == "city":
-        data["city"] = value
-        put_session(db, chat_id, "address", data)
-        send_order(db, chat_id, "العنوان الكامل للتوصيل؟")
-    elif step == "address":
-        p = products.get(data["sku"])
-        if not p:
-            cancel(db, chat_id)
-            send_order(db, chat_id, "هذا المنتج لم يعد متاحًا. اكتب /start لاختيار منتج آخر.")
-            return
-        data["address"] = value
-        review_order(chat_id, p, data, db)
+        previous = db.execute("SELECT customer_name, phone, city, address FROM orders WHERE chat_id=? ORDER BY id DESC LIMIT 1",
+                              (chat_id,)).fetchone()
+        if previous:
+            for field in DETAIL_FIELDS:
+                data.setdefault(field, previous["customer_name" if field == "name" else field])
+            show_saved_details(chat_id, data, db)
+        else:
+            next_detail(chat_id, data, products, db)
+    elif step in DETAIL_FIELDS:
+        if step == "phone":
+            value = re.sub(r"[\s().-]", "", value)
+            if not re.fullmatch(r"\+?[0-9]{9,15}", value):
+                send_order(db, chat_id, "أدخل رقم هاتف صحيحًا، مثل 0612345678 أو +212612345678.")
+                return
+        data[step] = value
+        if data.pop("editing_detail", False):
+            show_saved_details(chat_id, data, db)
+        else:
+            next_detail(chat_id, data, products, db)
+    elif step == "details":
+        send_order(db, chat_id, "اختر «متابعة بهذه البيانات» أو اضغط على الحقل الذي تريد تعديله في الرسالة أعلاه.")
     else:
         send_order(db, chat_id, "اضغط على زر تأكيد الطلب أو اكتب /cancel.")
+
+
+def next_detail(chat_id: int, data: dict, products: dict, db: sqlite3.Connection) -> None:
+    for field, label in DETAIL_FIELDS.items():
+        value = data.get(field, "")
+        if (not isinstance(value, str) or not value.strip() or len(value) > 150
+                or (field == "phone" and not re.fullmatch(r"\+?[0-9]{9,15}", value))):
+            put_session(db, chat_id, field, data)
+            send_order(db, chat_id, label + "؟")
+            return
+    if data["sku"] not in products:
+        cancel(db, chat_id)
+        send(chat_id, "هذا المنتج لم يعد متاحًا. اكتب /start لاختيار منتج آخر.")
+        return
+    review_order(chat_id, products[data["sku"]], data, db)
+
+
+def show_saved_details(chat_id: int, data: dict, db: sqlite3.Connection) -> None:
+    message = send_order(db, chat_id,
+        "مرحبًا بك في LuxeVista ✨\nلتسهيل طلبك، جهّزنا بيانات التوصيل للمراجعة.\n"
+        "يمكنك المتابعة بها أو تعديل أي حقل أدناه.\n\n"
+        + "\n".join(f"{label}: {data.get(field) or 'غير مكتمل'}" for field, label in DETAIL_FIELDS.items())
+        + "\n\nلن يُرسل الطلب حتى تراجع الملخص وتؤكده. تُحفظ التعديلات مع الطلب الجديد.",
+        [[("✅ متابعة بهذه البيانات", "details:use")],
+         [("✏️ الاسم", "details:name"), ("✏️ الهاتف", "details:phone")],
+         [("✏️ المدينة", "details:city"), ("✏️ العنوان", "details:address")],
+         [("❌ إلغاء", "cancel")]])
+    data["details_message_id"] = message["message_id"]
+    put_session(db, chat_id, "details", data)
 
 
 def review_order(chat_id: int, p: dict, data: dict, db: sqlite3.Connection) -> None:
@@ -653,7 +726,8 @@ def review_order(chat_id: int, p: dict, data: dict, db: sqlite3.Connection) -> N
          f"الاسم: {data['name']}\nالهاتف: {data['phone']}\n"
          f"المدينة: {data['city']}\nالعنوان: {data['address']}\n\n"
          "بالضغط على تأكيد، سترسل بياناتك إلى البائع لمتابعة الطلب.",
-         [[("✅ تأكيد الطلب", "confirm"), ("❌ إلغاء", "cancel")]])
+         [[("✅ تأكيد الطلب", "confirm"), ("❌ إلغاء", "cancel")],
+          [("✏️ تعديل بيانات التوصيل", "details:edit")]])
     data["confirm_message_id"] = message["message_id"]
     put_session(db, chat_id, "confirm", data)
 
@@ -666,6 +740,12 @@ def check_stock(chat_id: int, sku: str, quantity: int, products: dict, db: sqlit
     available = shop.stock(db, sku)
     if available == 0:
         show_product(chat_id, products[sku], db)
+        return False
+    if not MIN_QUANTITY <= quantity <= 1000:
+        send_order(db, chat_id, "الحد الأدنى للطلب 10 قطع. أدخل الكمية من 10 إلى 1000.")
+        return False
+    if available is not None and available < MIN_QUANTITY:
+        send_order(db, chat_id, f"المتاح حاليًا {available} قطع، وهو أقل من الحد الأدنى (10 قطع). يرجى المحاولة عند توفر كمية إضافية.")
         return False
     if available is not None and quantity > available:
         send_order(db, chat_id, f"الكمية المتاحة حاليًا: {available}. أدخل كمية أقل.")
@@ -750,20 +830,42 @@ def handle_callback(callback: dict, products: dict, db: sqlite3.Connection) -> N
         sku = command[5:]
         if sku in products:
             remember_order_message(db, chat_id, callback["message"]["message_id"])
-            show_product(chat_id, products[sku], db, "catalog")
+            show_product(chat_id, products[sku], db, "catalog", include_photos=True)
         return
     if command.startswith("order:"):
         admin.clear_editor(db, chat_id)
         parts = command.split(":", 2)
         if len(parts) == 3 and parts[1] in products and SOURCE_PATTERN.fullmatch(parts[2]):
-            if not check_stock(chat_id, parts[1], 1, products, db):
+            if not check_stock(chat_id, parts[1], MIN_QUANTITY, products, db):
                 return
             if not ADMIN_CHAT_ID:
                 send(chat_id, "الطلب غير متاح الآن. يرجى المحاولة لاحقًا.")
                 return
             put_session(db, chat_id, "quantity", {"sku": parts[1], "source": parts[2]})
             remember_order_message(db, chat_id, callback["message"]["message_id"])
-            send_order(db, chat_id, "كم قطعة تريد؟ (من 1 إلى 1000)\nيمكنك الإلغاء بـ /cancel")
+            send_order(db, chat_id, "كم قطعة تريد؟\nالحد الأدنى للطلب 10 قطع (من 10 إلى 1000).\nيمكنك الإلغاء بـ /cancel")
+        return
+    if command.startswith("details:"):
+        current = session(db, chat_id)
+        if not current:
+            send(chat_id, "انتهت هذه الخطوة. اكتب /start لإنشاء طلب جديد.")
+            return
+        step, data = current
+        action = command.split(":", 1)[1]
+        expected = data.get("confirm_message_id") if step == "confirm" and action == "edit" else data.get("details_message_id")
+        if (callback["message"]["message_id"] != expected
+                or not (step == "details" and (action == "use" or action in DETAIL_FIELDS)
+                        or step == "confirm" and action == "edit")):
+            send(chat_id, "يرجى استخدام الأزرار في أحدث رسالة لطلبك.")
+            return
+        if action == "edit":
+            show_saved_details(chat_id, data, db)
+        elif action == "use":
+            next_detail(chat_id, data, products, db)
+        else:
+            data["editing_detail"] = True
+            put_session(db, chat_id, action, data)
+            send_order(db, chat_id, f"أدخل {DETAIL_FIELDS[action]} الجديد:")
         return
     if command == "cancel":
         cancel(db, chat_id)

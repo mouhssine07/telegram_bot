@@ -51,7 +51,7 @@ class BotTestCase(unittest.TestCase):
     def fill_form(self, chat_id=101):
         self.text(chat_id, "/start p_p0001_channel", 1)
         self.callback(chat_id, "order:p0001:channel", self.next_id)
-        for message_id, value in enumerate(["2", "Customer X", "0612345678", "Rabat", "Test street"], 2):
+        for message_id, value in enumerate(["10", "Customer X", "0612345678", "Rabat", "Test street"], 2):
             self.text(chat_id, value, message_id)
         return self.next_id
 
@@ -68,6 +68,153 @@ class BotTestCase(unittest.TestCase):
 
 
 class OrderFlowTests(BotTestCase):
+    def test_channel_link_shows_single_product_photo_before_order_card(self):
+        self.db.execute("INSERT INTO published_posts VALUES (999, 5, 'p0001', '@channel', 77)")
+        self.db.commit()
+        self.text(101, "/start p_p0001_channel")
+        self.assertEqual(self.calls[0][0], "copyMessage")
+        photo = self.calls[0][1]
+        self.assertEqual((photo["chat_id"], photo["from_chat_id"], photo["message_id"]), (101, "@channel", 77))
+        self.assertEqual(photo["caption"], "Test watch")
+        self.assertEqual(json.loads(photo["reply_markup"]), {"inline_keyboard": []})
+        self.assertIn("order:p0001:channel", self.calls[-1][1]["reply_markup"])
+
+    def test_channel_link_reuses_album_photos_in_original_order_after_restart(self):
+        self.db.execute("INSERT INTO published_albums VALUES (999, 'a', 'p0001', '@channel', '[70,71]', NULL)")
+        for mid in [6, 5]:
+            self.db.execute("INSERT INTO album_items VALUES (999, 'a', ?, ?, '', NULL)", (mid, f"photo-{mid}"))
+        self.db.commit()
+        self.db.close()
+        self.db = self.bot.connect()
+        self.text(101, "/start p_p0001_channel")
+        self.assertEqual(self.calls[0][0], "sendMediaGroup")
+        media = json.loads(self.calls[0][1]["media"])
+        self.assertEqual([p["media"] for p in media], ["photo-5", "photo-6"])
+        self.assertEqual(media[0]["caption"], "Test watch")
+        self.assertNotIn("caption", media[1])
+        self.assertIn("order:p0001:channel", self.calls[-1][1]["reply_markup"])
+
+    def test_legacy_album_uses_channel_copy_and_missing_media_does_not_block_ordering(self):
+        self.db.execute("INSERT INTO published_albums VALUES (999, 'a', 'p0001', '@channel', '[70,71]', NULL)")
+        self.db.commit()
+        self.text(101, "/start p_p0001_channel")
+        self.assertEqual(self.calls[0][0], "copyMessages")
+        self.assertEqual(json.loads(self.calls[0][1]["message_ids"]), [70, 71])
+        self.calls.clear()
+        def fail_media(method, data=None, timeout=15):
+            if method == "copyMessages":
+                raise RuntimeError("Media unavailable")
+            return self.api(method, data, timeout)
+        self.bot.api = fail_media
+        self.text(101, "/start p_p0001_channel")
+        self.assertIn("order:p0001:channel", self.calls[-1][1]["reply_markup"])
+        self.callback(101, "order:p0001:channel", self.next_id)
+        self.assertEqual(self.bot.session(self.db, 101)[0], "quantity")
+
+    def test_catalog_imported_photo_and_photo_preservation_after_checkout(self):
+        self.db.execute("INSERT INTO source_imports VALUES (999, 5, 'p0001')")
+        self.db.commit()
+        self.callback(101, "view:p0001", 80)
+        photo = next(data for method, data in self.calls if method == "copyMessage")
+        self.assertEqual((photo["from_chat_id"], photo["message_id"]), (999, 5))
+        def media_api(method, data=None, timeout=15):
+            if method == "copyMessage":
+                self.calls.append((method, dict(data)))
+                return {"message_id": 9000}
+            return self.api(method, data, timeout)
+        self.bot.api = media_api
+        self.callback(101, "confirm", self.fill_form())
+        deleted = [mid for method, data in self.calls if method == "deleteMessages"
+                   for mid in json.loads(data["message_ids"])]
+        self.assertNotIn(9000, deleted)
+
+    def test_product_without_media_or_unknown_sku_never_copies_another_product(self):
+        self.db.execute("INSERT INTO published_posts VALUES (999, 5, 'other', '@channel', 77)")
+        self.db.commit()
+        self.text(101, "/start p_p0001_channel")
+        self.text(101, "/start p_removed_channel")
+        self.assertFalse(any(method in ("copyMessage", "copyMessages", "sendMediaGroup") for method, data in self.calls))
+
+    def start_quantity(self, chat_id=101, quantity="10"):
+        self.text(chat_id, "/start")
+        self.callback(chat_id, "order:p0001:catalog", self.next_id)
+        self.text(chat_id, quantity)
+
+    def test_minimum_quantity_blocks_small_orders_and_legacy_confirmation(self):
+        self.start_quantity(quantity="9")
+        self.assertEqual(self.bot.session(self.db, 101)[0], "quantity")
+        for value in ["0", "1", "1001"]:
+            self.text(101, value)
+            self.assertEqual(self.bot.session(self.db, 101)[0], "quantity")
+        self.text(101, "10")
+        self.assertEqual(self.bot.session(self.db, 101)[0], "name")
+        confirm_id = self.fill_form()
+        _, data = self.bot.session(self.db, 101)
+        data["quantity"] = 1
+        self.bot.put_session(self.db, 101, "confirm", data)
+        self.callback(101, "confirm", confirm_id)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM orders").fetchone()[0], 0)
+        self.assertEqual(self.bot.session(self.db, 101)[0], "quantity")
+
+    def test_stock_below_minimum_cannot_start_checkout(self):
+        self.text(999, "/stock p0001 9")
+        self.start_quantity()
+        self.assertIsNone(self.bot.session(self.db, 101))
+
+    def test_returning_customer_reuses_own_details_after_restart(self):
+        self.insert_order(101, "Returning customer")
+        self.insert_order(202, "Other customer")
+        self.start_quantity()
+        step, data = self.bot.session(self.db, 101)
+        self.assertEqual(step, "details")
+        self.assertEqual(data["name"], "Returning customer")
+        self.assertNotIn("Other customer", self.sent_text())
+        self.db.close()
+        self.db = self.bot.connect()
+        self.callback(101, "details:use", data["details_message_id"])
+        self.assertEqual(self.bot.session(self.db, 101)[0], "confirm")
+        self.callback(101, "confirm", self.next_id)
+        order = self.db.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual((order["customer_name"], order["quantity"], order["chat_id"]), ("Returning customer", 10, 101))
+
+    def test_returning_customer_edits_only_one_field_and_old_buttons_are_ignored(self):
+        self.insert_order(101, "Returning customer")
+        self.start_quantity()
+        old_id = self.next_id
+        self.callback(101, "details:phone", old_id)
+        self.text(101, "invalid")
+        self.assertEqual(self.bot.session(self.db, 101)[0], "phone")
+        self.text(101, "0699999999")
+        new_id = self.next_id
+        self.callback(101, "details:use", old_id)
+        self.assertEqual(self.bot.session(self.db, 101)[0], "details")
+        self.callback(101, "details:use", new_id)
+        summary_id = self.next_id
+        self.callback(101, "details:edit", summary_id)
+        self.callback(101, "details:city", self.next_id)
+        self.text(101, "Casablanca")
+        self.callback(101, "confirm", summary_id)
+        self.assertEqual(self.bot.session(self.db, 101)[0], "details")
+        self.callback(101, "details:use", self.bot.session(self.db, 101)[1]["details_message_id"])
+        self.callback(101, "confirm", self.next_id)
+        old, new = self.db.execute("SELECT * FROM orders ORDER BY id").fetchall()
+        self.assertEqual((old["phone"], old["city"]), ("0612345678", "Rabat"))
+        self.assertEqual((new["phone"], new["city"], new["customer_name"]), ("0699999999", "Casablanca", "Returning customer"))
+
+    def test_missing_saved_field_is_requested_and_cancel_does_not_change_saved_details(self):
+        self.insert_order(101, "Returning customer")
+        self.db.execute("UPDATE orders SET address='' WHERE chat_id=101")
+        self.db.commit()
+        self.start_quantity()
+        self.callback(101, "details:use", self.next_id)
+        self.assertEqual(self.bot.session(self.db, 101)[0], "address")
+        self.text(101, "New address")
+        self.assertEqual(self.bot.session(self.db, 101)[0], "confirm")
+        self.text(101, "/cancel")
+        self.assertEqual(self.db.execute("SELECT address FROM orders").fetchone()[0], "")
+        self.start_quantity(chat_id=202)
+        self.assertEqual(self.bot.session(self.db, 202)[0], "name")
+
     def test_modern_caption_uses_current_price_and_valid_emoji_entity_offsets(self):
         product = {"sku": "p0001", "name": "⌚ ساعة", "price_dh": 150,
                    "description": "⌚ ساعة — ذهبية ✨ ---- 120 درهم"}
@@ -75,11 +222,17 @@ class OrderFlowTests(BotTestCase):
         self.assertEqual(caption.count("⌚ ساعة"), 1)
         self.assertIn("ذهبية ✨", caption)
         self.assertIn("150 DH", caption)
+        self.assertIn("🟨", caption)
+        self.assertNotIn("Delivery fee", caption)
+        self.assertNotIn("رسوم التوصيل", caption)
+        self.assertIn("Minimum: 10 pieces", caption)
         self.assertNotIn("120", caption)
         self.assertIn("LUXEVISTA", caption)
         encoded = caption.encode("utf-16-le")
         labels = [encoded[e["offset"] * 2:(e["offset"] + e["length"]) * 2].decode("utf-16-le") for e in entities]
         self.assertIn("⌚ ساعة", labels)
+        self.assertTrue(any(label == "150 DH" and entity["type"] == "text_link"
+                            for label, entity in zip(labels, entities)))
         self.assertEqual(labels[-1], "🛍 اطلب الآن | Order now")
         self.assertEqual(entities[-1]["url"], "https://t.me/TestBot?start=p_p0001_channel")
         product["description"] = "✨" * 950
@@ -292,13 +445,13 @@ class NotificationTests(BotTestCase):
         self.callback(chat_id, "restock:p0001", 99)
 
     def test_stock_is_manual_after_confirmation_and_order_deletion(self):
-        self.text(999, "/stock p0001 2")
+        self.text(999, "/stock p0001 10")
         confirm_id = self.fill_form()
         self.callback(101, "confirm", confirm_id)
         self.assertEqual(self.db.execute("SELECT count(*) FROM orders").fetchone()[0], 1)
-        self.assertEqual(self.bot.shop.stock(self.db, "p0001"), 2)
+        self.assertEqual(self.bot.shop.stock(self.db, "p0001"), 10)
         self.text(999, "/delete 1")
-        self.assertEqual(self.bot.shop.stock(self.db, "p0001"), 2)
+        self.assertEqual(self.bot.shop.stock(self.db, "p0001"), 10)
 
     def test_unavailable_product_shows_notify_button_and_blocks_stale_order_button(self):
         self.text(999, "/stock p0001 0")
@@ -309,10 +462,10 @@ class NotificationTests(BotTestCase):
         self.assertIsNone(self.bot.session(self.db, 101))
 
     def test_stock_is_rechecked_at_quantity_and_confirmation(self):
-        self.text(999, "/stock p0001 2")
+        self.text(999, "/stock p0001 10")
         self.text(101, "/start p_p0001_channel")
         self.callback(101, "order:p0001:channel", self.next_id)
-        self.text(101, "3")
+        self.text(101, "11")
         self.assertEqual(self.bot.session(self.db, 101)[0], "quantity")
         confirm_id = self.fill_form()
         self.text(999, "/stock p0001 0")
