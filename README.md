@@ -74,6 +74,7 @@ You can also edit `products.json` to set the SKU, name, description, and **unit 
 | `/preview SKU` | Admin: reply to a prepared product post to preview it with an order button. |
 | `/publish SKU` | Admin: reply to a prepared product post to publish it in the channel. |
 | `/edit SKU` | Owner/team: update all recorded posts for this product in the configured channel, using its saved catalog details. No reply needed. |
+| `/edit TELEGRAM_POST_LINK` | Owner/team: read a channel product post, import it under an automatic SKU, and apply LuxeVista formatting in place. Works for supported posts published manually too. |
 | `/edit SKU TELEGRAM_POST_LINK` | Owner/team: repair a single publication's caption reference and edit the actual post. Use Copy Link on the album photo carrying the caption. |
 | `/stock SKU` | Admin: see the current stock quantity, or whether stock is not tracked yet. |
 | `/stock SKU 5` | Admin: set the available quantity to 5 (not add 5). Use 0 for unavailable. |
@@ -133,6 +134,12 @@ Repeated `/edit` is safe when the content is already current. If a message was d
 
 If the saved caption reference is wrong but the actual post still exists, use its Telegram Copy Link URL: `/edit p0003 https://t.me/yourchannel/872`. Public and private (`https://t.me/c/.../...`) post links are supported. The bot verifies that the link belongs to the configured channel, requires exactly one recorded publication for that product, and saves the corrected reference only after a successful or already-current edit. Future `/edit SKU` calls then use the repaired caption reference. It does not recreate deleted posts, replace album media records, or repair a missing separate button message.
 
+**Import and format any existing product post by link:** send `/edit https://t.me/yourchannel/713` in the private admin chat. No SKU is required. The bot must be an administrator with **Edit Messages** enabled in the configured channel. It forwards a private copy to the requesting admin to read the original content, extracts the name, description and a single unambiguous whole-DH price, assigns an automatic SKU, saves the catalog product, and edits the original message using the current LuxeVista layout. It does not delete or republish the product post. Supported posts are photos, videos and text. Posts without a clear price, inaccessible/deleted posts, and posts protected from forwarding cannot be imported this way. When several different DH amounts appear (for example price plus delivery), clarify the original price before retrying.
+
+For an album, copy the link of the photo carrying its caption. The other album photos stay as they are; the Bot API does not enumerate the album from that single link, so a newly imported product's private preview uses the selected photo. If no separate order-button message is recorded, one is added at the bottom of the channel and saved for future edits. This new button message cannot be inserted next to an older album. Text and standalone photo/video posts receive a button on the original message.
+
+Repeating the same link reuses its SKU and applies the current saved catalog details. Change those details in `/products` first if needed. Known bot publications also reuse their existing SKU. If the catalog was saved but a Telegram edit failed, the bot reports this and retrying the same link resumes without creating a second product. The original message and the catalog cannot be updated in a single atomic transaction; a failed Telegram edit can leave a saved product awaiting its post update. Link imports do not queue arrival notifications. Keep `channel_posts.py` alongside the other Python modules when deploying.
+
 Future previews/publications use the latest catalog name, price, and description. If the name or price changes during checkout, the customer must review and confirm the latest summary before the order is saved. Setting stock from zero to a positive quantity through the panel triggers the existing opt-in restock alerts.
 
 **Sales totals:** `/sales` and the panel show order counts, unit counts, and product value for each current status. Delivered order value is shown separately from new, confirmed, shipped, and cancelled orders. Reports use the price saved on each order, not today's catalog price. Today/month filter by the order's placement date in UTC, not its delivery date. Delivery fees, costs, payment collection and profit are not tracked. Permanently deleted orders are excluded from totals.
@@ -169,7 +176,7 @@ Alerts are delivered while `python bot.py` is running. The queue survives restar
 1. Run the offline tests from this folder. They use temporary files and a simulated Telegram API, without reading your real `.env`, changing your real catalog/database, or starting the bot:
 
    ```powershell
-   python -B -m unittest -v test_bot test_admin_panel test_basket test_post_edit
+   python -B -m unittest -v test_bot test_admin_panel test_basket test_post_edit test_channel_posts
    ```
 
 2. Stop your running bot yourself with Ctrl+C, then start it yourself:

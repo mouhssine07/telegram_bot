@@ -15,6 +15,7 @@ from pathlib import Path
 
 import shop_updates as shop
 import admin_panel as admin
+import channel_posts
 
 
 ROOT = Path(__file__).resolve().parent
@@ -277,6 +278,7 @@ def connect() -> sqlite3.Connection:
     db.commit()
     shop.init_schema(db)
     admin.init_schema(db)
+    channel_posts.init_schema(db)
     db.execute("""CREATE TABLE IF NOT EXISTS basket_items (
         chat_id INTEGER NOT NULL, sku TEXT NOT NULL, quantity INTEGER NOT NULL,
         source TEXT NOT NULL, PRIMARY KEY (chat_id, sku)
@@ -363,6 +365,13 @@ def send_product_photos(chat_id: int, product: dict, db: sqlite3.Connection) -> 
         SELECT 1 FROM album_items a WHERE a.source_chat_id=s.source_chat_id
         AND a.source_message_id=s.source_message_id) ORDER BY s.rowid DESC LIMIT 1""", (sku,)).fetchone()
     if not post and not original:
+        linked = db.execute("SELECT kind, file_id FROM channel_products WHERE sku=? AND file_id IS NOT NULL LIMIT 1", (sku,)).fetchone()
+        if linked:
+            try:
+                api("sendPhoto" if linked["kind"] == "photo" else "sendVideo",
+                    {"chat_id": chat_id, linked["kind"]: linked["file_id"], "caption": product["name"]})
+            except RuntimeError:
+                send(chat_id, "Product photo unavailable. You can still order below.")
         return
     try:
         api("copyMessage", {"chat_id": chat_id,
@@ -461,8 +470,20 @@ def edit_published_product(chat_id, command, products, db, bot_username):
         send(chat_id, "هذا الأمر مخصص للمسؤول. | Admin access required.")
         return
     parts = command.split()
+    if len(parts) == 2 and parts[1].startswith("https://"):
+        try:
+            sku = channel_posts.edit_link(db, products, chat_id, CHANNEL_ID, bot_username, parts[1],
+                api=api, save_products=save_products, next_sku=next_sku, parse_caption=parse_product_caption,
+                caption=product_post_caption, keyboard=order_link_keyboard)
+        except (RuntimeError, ValueError, OSError, sqlite3.Error) as exc:
+            send(chat_id, f"Could not complete the post update: {exc}")
+            return
+        send(chat_id, f"✅ Post updated in place. Product: {sku}\n{products[sku]['name']} — {products[sku]['price_dh']} DH\n"
+             f"Manage it in /products. Next time use /edit {sku} or the same post link.")
+        return
     if len(parts) not in (2, 3):
-        send(chat_id, "Usage: /edit SKU [TELEGRAM_POST_LINK]\nExample: /edit p0003\nFirst save the new details in /products.")
+        send(chat_id, "Usage: /edit TELEGRAM_POST_LINK to import and format a post, or /edit SKU to apply saved product details.\n"
+             "Example: /edit https://t.me/yourchannel/123\nFor reference repairs: /edit SKU TELEGRAM_POST_LINK")
         return
     sku = parts[1]
     if sku not in products:
@@ -475,6 +496,17 @@ def edit_published_product(chat_id, command, products, db, bot_username):
                        (sku, CHANNEL_ID)).fetchall()
     albums = db.execute("SELECT copied_message_ids, cta_message_id FROM published_albums WHERE sku=? AND target_chat_id=?",
                         (sku, CHANNEL_ID)).fetchall()
+    linked = db.execute("SELECT * FROM channel_products WHERE sku=? AND target_chat_id=?", (sku, CHANNEL_ID)).fetchall()
+    if linked and len(parts) == 2:
+        # Link-adopted posts include text messages and album button state.
+        for row in linked:
+            try:
+                channel_posts.update(db, row, products[sku], bot_username, api, product_post_caption, order_link_keyboard)
+                send(chat_id, f"✅ {sku}: linked post #{row['message_id']} updated in place.")
+            except RuntimeError as exc:
+                send(chat_id, f"Could not update linked post #{row['message_id']}: {exc}")
+        if not posts and not albums:
+            return
     if not posts and not albums:
         send(chat_id, f"No recorded channel posts for {sku} in {CHANNEL_ID}. Nothing was published or replaced.")
         return
