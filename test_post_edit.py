@@ -115,3 +115,59 @@ class PostEditTests(BotTestCase):
         self.text(999, '/edit p0001')
         self.assertEqual(self.edits(), [])
         self.assertIn('too long', self.sent_text())
+
+    def channel_api(self, method, data, timeout=15):
+        if method == 'getChat':
+            return {'id': -1001234, 'username': 'channel'}
+        return self.api(method, data, timeout)
+
+    def test_post_link_repairs_reference_and_survives_restart(self):
+        self.bot.api = self.channel_api
+        self.text(999, '/edit p0001 https://t.me/channel/872')
+        self.assertEqual(self.edits()[-1][1]['message_id'], 872)
+        self.db.close()
+        self.db = self.bot.connect()
+        self.text(999, '/edit p0001')
+        self.assertEqual(self.edits()[-1][1]['message_id'], 872)
+        self.assert_no_republication()
+
+    def test_album_link_repairs_caption_only_and_keeps_button_and_media_records(self):
+        self.db.execute('DELETE FROM published_posts')
+        self.db.execute("INSERT INTO published_albums VALUES (999, 'a', 'p0001', '@channel', '[70,71]', 72)")
+        self.db.commit()
+        self.bot.api = self.channel_api
+        self.text(999, '/edit p0001 https://t.me/c/1234/872?single')
+        self.assertEqual([(m, d['message_id']) for m, d in self.edits()], [('editMessageCaption', 872), ('editMessageText', 72)])
+        self.assertEqual(self.db.execute('SELECT copied_message_ids FROM published_albums').fetchone()[0], '[70,71]')
+        self.assert_no_republication()
+
+    def test_wrong_channel_and_ambiguous_publications_cannot_repair(self):
+        self.bot.api = self.channel_api
+        for link in ['https://t.me/wrong/872', 'https://t.me/c/999/872', 'https://example.com/channel/872']:
+            self.text(999, '/edit p0001 ' + link)
+        self.db.execute("INSERT INTO published_posts VALUES (999, 2, 'p0001', '@channel', 51)")
+        self.db.commit()
+        self.text(999, '/edit p0001 https://t.me/channel/872')
+        self.assertEqual(self.edits(), [])
+        self.assertEqual(self.db.execute('SELECT count(*) FROM post_caption_overrides').fetchone()[0], 0)
+
+    def test_failed_repair_does_not_save_reference(self):
+        def failed_api(method, data, timeout=15):
+            if method == 'editMessageCaption':
+                raise self.bot.shop.TelegramError('Bad Request: message to edit not found', 400)
+            return self.channel_api(method, data, timeout)
+        self.bot.api = failed_api
+        self.text(999, '/edit p0001 https://t.me/channel/872')
+        self.assertEqual(self.db.execute('SELECT count(*) FROM post_caption_overrides').fetchone()[0], 0)
+        self.assertIn('saved message is unavailable', self.sent_text())
+        self.assert_no_republication()
+
+    def test_already_current_repair_still_saves_reference(self):
+        def unchanged_api(method, data, timeout=15):
+            if method == 'editMessageCaption':
+                raise self.bot.shop.TelegramError('Bad Request: message is not modified', 400)
+            return self.channel_api(method, data, timeout)
+        self.bot.api = unchanged_api
+        self.text(999, '/edit p0001 https://t.me/channel/872')
+        self.assertEqual(self.db.execute('SELECT caption_message_id FROM post_caption_overrides').fetchone()[0], 872)
+        self.assertIn('1 already current', self.sent_text())

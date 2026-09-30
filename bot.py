@@ -281,6 +281,11 @@ def connect() -> sqlite3.Connection:
         chat_id INTEGER NOT NULL, sku TEXT NOT NULL, quantity INTEGER NOT NULL,
         source TEXT NOT NULL, PRIMARY KEY (chat_id, sku)
     )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS post_caption_overrides (
+        target_chat_id TEXT NOT NULL, original_message_id INTEGER NOT NULL,
+        caption_message_id INTEGER NOT NULL,
+        PRIMARY KEY (target_chat_id, original_message_id)
+    )""")
     db.commit()
     return db
 
@@ -456,8 +461,8 @@ def edit_published_product(chat_id, command, products, db, bot_username):
         send(chat_id, "هذا الأمر مخصص للمسؤول. | Admin access required.")
         return
     parts = command.split()
-    if len(parts) != 2:
-        send(chat_id, "Usage: /edit SKU\nExample: /edit p0003\nFirst save the new details in /products.")
+    if len(parts) not in (2, 3):
+        send(chat_id, "Usage: /edit SKU [TELEGRAM_POST_LINK]\nExample: /edit p0003\nFirst save the new details in /products.")
         return
     sku = parts[1]
     if sku not in products:
@@ -473,6 +478,26 @@ def edit_published_product(chat_id, command, products, db, bot_username):
     if not posts and not albums:
         send(chat_id, f"No recorded channel posts for {sku} in {CHANNEL_ID}. Nothing was published or replaced.")
         return
+    repair_mid = None
+    if len(parts) == 3:
+        link = re.fullmatch(r"https://t\.me/(?:(c)/([0-9]+)|([A-Za-z0-9_]+))/([1-9][0-9]*)(?:\?single)?", parts[2])
+        if not link:
+            send(chat_id, "Use the Telegram post's Copy Link URL, e.g. /edit p0003 https://t.me/yourchannel/123")
+            return
+        if len(posts) + len(albums) != 1:
+            send(chat_id, "This product has multiple recorded publications. A post link cannot safely select which record to repair.")
+            return
+        try:
+            channel = api("getChat", {"chat_id": CHANNEL_ID})
+        except RuntimeError as exc:
+            send(chat_id, f"Could not verify the channel: {exc}")
+            return
+        matches = (str(channel["id"]) == "-100" + link[2] if link[1]
+                   else str(channel.get("username", "")).lower() == link[3].lower())
+        if not matches:
+            send(chat_id, "That post link is not from the configured channel. No changes made.")
+            return
+        repair_mid = int(link[4])
     try:
         caption, entities = product_post_caption(products[sku], bot_username, "channel")
     except RuntimeError as exc:
@@ -505,7 +530,13 @@ def edit_published_product(chat_id, command, products, db, bot_username):
             missing_buttons += 1
     updated = unchanged = 0
     failures = []
+    repaired = False
     for (method, mid), payload in operations.items():
+        original_mid = mid
+        if method == "editMessageCaption":
+            override = db.execute("SELECT caption_message_id FROM post_caption_overrides WHERE target_chat_id=? AND original_message_id=?",
+                                  (CHANNEL_ID, mid)).fetchone()
+            mid = repair_mid if repair_mid is not None else override[0] if override else mid
         try:
             api(method, {"chat_id": CHANNEL_ID, "message_id": mid, **payload})
             updated += 1
@@ -514,10 +545,22 @@ def edit_published_product(chat_id, command, products, db, bot_username):
                 unchanged += 1
             else:
                 failures.append(f"#{mid}: {exc}")
+                continue
+        if method == "editMessageCaption" and repair_mid is not None:
+            with db:
+                db.execute("INSERT OR REPLACE INTO post_caption_overrides VALUES (?, ?, ?)",
+                           (CHANNEL_ID, original_mid, mid))
+            repaired = True
     message = f"{sku}: {updated} channel message(s) updated; {unchanged} already current."
     if failures:
         message += f"\n{len(failures)} update(s) failed. Check bot permissions and whether the posts still exist, then retry /edit {sku}."
         message += "\n" + "\n".join(failures[:5])[:1000]
+        if any("message to edit not found" in failure.lower() for failure in failures):
+            message += (f"\nThe saved message is unavailable in {CHANNEL_ID}. If the product post still exists, "
+                        f"copy its link and send /edit {sku} TELEGRAM_POST_LINK to repair a single publication. "
+                        "For an album, copy the link of the photo carrying its caption. Deleted posts cannot be edited.")
+    if repaired:
+        message += f"\nSaved the corrected caption reference. Next time use /edit {sku}."
     if invalid_records:
         message += f"\n{invalid_records} album record(s) have invalid saved message IDs and were skipped."
     if missing_buttons:

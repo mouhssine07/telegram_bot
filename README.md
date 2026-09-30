@@ -74,6 +74,7 @@ You can also edit `products.json` to set the SKU, name, description, and **unit 
 | `/preview SKU` | Admin: reply to a prepared product post to preview it with an order button. |
 | `/publish SKU` | Admin: reply to a prepared product post to publish it in the channel. |
 | `/edit SKU` | Owner/team: update all recorded posts for this product in the configured channel, using its saved catalog details. No reply needed. |
+| `/edit SKU TELEGRAM_POST_LINK` | Owner/team: repair a single publication's caption reference and edit the actual post. Use Copy Link on the album photo carrying the caption. |
 | `/stock SKU` | Admin: see the current stock quantity, or whether stock is not tracked yet. |
 | `/stock SKU 5` | Admin: set the available quantity to 5 (not add 5). Use 0 for unavailable. |
 | `/category SKU women collections` | Admin: replace the product's categories. Set these before first publication. |
@@ -129,6 +130,8 @@ Buttons use an internal permanent reference, so `/delete` renumbering cannot red
 Add product uses the same photo/album import flow and automatic SKU protection as before. Catalog edits keep the SKU and extra product fields, and preserve other products and saved order prices. After saving a name, price, or description in `/products`, send `/edit SKU` (for example `/edit p0003`) to apply the current catalog details to existing channel posts. This updates all recorded publications for that SKU in the configured `CHANNEL_ID`, including posts published by teammates. Single-photo captions and buttons are edited in place. Albums update their first photo's caption and their existing separate button message. Photos, message IDs, and post positions are preserved; no posts are deleted or republished, and no arrival announcements are queued. Original import captions are not changed.
 
 Repeated `/edit` is safe when the content is already current. If a message was deleted, permissions were lost, or a network request failed, the bot reports partial results; retry `/edit SKU` after resolving the issue. Older albums with no saved button message receive caption updates only, with a notice that the button is missing. `/edit` does not create that missing message or discover manually published posts. Changing `CHANNEL_ID` to a different identifier also requires matching saved publication records.
+
+If the saved caption reference is wrong but the actual post still exists, use its Telegram Copy Link URL: `/edit p0003 https://t.me/yourchannel/872`. Public and private (`https://t.me/c/.../...`) post links are supported. The bot verifies that the link belongs to the configured channel, requires exactly one recorded publication for that product, and saves the corrected reference only after a successful or already-current edit. Future `/edit SKU` calls then use the repaired caption reference. It does not recreate deleted posts, replace album media records, or repair a missing separate button message.
 
 Future previews/publications use the latest catalog name, price, and description. If the name or price changes during checkout, the customer must review and confirm the latest summary before the order is saved. Setting stock from zero to a positive quantity through the panel triggers the existing opt-in restock alerts.
 
