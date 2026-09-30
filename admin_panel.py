@@ -20,6 +20,10 @@ def init_schema(db):
             db.execute("ALTER TABLE orders ADD COLUMN admin_key TEXT")
         if "status_version" not in columns:
             db.execute("ALTER TABLE orders ADD COLUMN status_version INTEGER NOT NULL DEFAULT 0")
+        if "items_json" not in columns:
+            db.execute("ALTER TABLE orders ADD COLUMN items_json TEXT")
+        if "total_dh" not in columns:
+            db.execute("ALTER TABLE orders ADD COLUMN total_dh INTEGER")
         for row in db.execute("SELECT id FROM orders WHERE admin_key IS NULL").fetchall():
             db.execute("UPDATE orders SET admin_key=? WHERE id=?", (uuid.uuid4().hex, row["id"]))
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS order_admin_key ON orders(admin_key)")
@@ -34,6 +38,23 @@ def init_schema(db):
             actor_chat_id INTEGER NOT NULL, old_status TEXT NOT NULL, new_status TEXT NOT NULL,
             changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )""")
+
+
+def order_items(order):
+    if order["items_json"]:
+        return json.loads(order["items_json"])
+    return [{"sku": order["sku"], "name": order["product_name"],
+             "price_dh": order["unit_price_dh"], "quantity": order["quantity"],
+             "source": order["source"]}]
+
+
+def item_summary(items):
+    return "\n".join(f"{item['name'][:60]} [{item['sku']}] × {item['quantity']} — "
+                     f"{item['price_dh'] * item['quantity']} DH" for item in items)
+
+
+def order_total(order):
+    return sum(item["price_dh"] * item["quantity"] for item in order_items(order))
 
 
 def is_owner(owner, chat_id):
@@ -125,9 +146,9 @@ class Panel:
                           "شكرًا لاختيارك LuxeVista. سنتواصل معك بخصوص التوصيل.\n\n"
                           f"✅ Your order #{current['id']} is confirmed\n"
                           "Thank you for choosing LuxeVista. We will contact you about delivery.\n\n"
-                          f"{current['product_name']} × {current['quantity']}\n"
+                          f"{item_summary(order_items(current))}\n"
                           f"المجموع بدون التوصيل | Total excluding delivery: "
-                          f"{current['unit_price_dh'] * current['quantity']} DH\n\n"
+                          f"{order_total(current)} DH\n\n"
                           "لمتابعة طلبك | View your order: /orders")
                 notice = "Status updated. Arabic/English confirmation sent to the customer.\n\n"
             except RuntimeError:
@@ -154,7 +175,7 @@ class Panel:
         where = {"all": "", "today": " WHERE created_at>=datetime('now','start of day')",
                  "month": " WHERE created_at>=datetime('now','start of month')"}[period]
         rows = self.db.execute("""SELECT status, count(*) AS orders, sum(quantity) AS units,
-            sum(unit_price_dh * quantity) AS value FROM orders""" + where + " GROUP BY status").fetchall()
+            sum(COALESCE(total_dh, unit_price_dh * quantity)) AS value FROM orders""" + where + " GROUP BY status").fetchall()
         by_status = {row["status"]: row for row in rows}
         lines = [f"📊 Orders placed: {period} (UTC)", "Current status / orders / units / value (DH)"]
         for status in dict.fromkeys([*STATUSES, *by_status]):
@@ -253,7 +274,7 @@ class Panel:
             self.products.clear()
             self.products.update(updated)
         clear_editor(self.db, chat_id)
-        self.send(chat_id, "Saved." + (" Catalog edits do not change photo captions or existing channel posts. Update their wording/prices separately." if field in ("name", "price_dh", "description") else ""))
+        self.send(chat_id, "Saved." + (f" Send /edit {sku} to update existing channel posts with these details." if field in ("name", "price_dh", "description") else ""))
         self.product(chat_id, sku)
         return True
 
