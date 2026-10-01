@@ -25,7 +25,7 @@ def apply_edit(api, method, payload):
 
 def update(db, row, product, username, api, caption, keyboard):
     text, entities = caption(product, username, "channel")
-    markup = keyboard(username, product["sku"], "channel")
+    markup = json.dumps({"inline_keyboard": []})
     payload = {"chat_id": row["channel_id"], "message_id": row["message_id"]}
     if row["kind"] == "text":
         payload.update(text=text, entities=json.dumps(entities, ensure_ascii=False), reply_markup=markup,
@@ -37,17 +37,11 @@ def update(db, row, product, username, api, caption, keyboard):
             payload["reply_markup"] = markup
         method = "editMessageCaption"
     apply_edit(api, method, payload)
-    if row["album_id"]:
-        payload = {"chat_id": row["channel_id"],
-                   "text": f"{product['name']} — {product['price_dh']} DH\n🛍 اضغط للطلب | Tap to order",
-                   "reply_markup": markup}
-        if row["cta_message_id"]:
-            apply_edit(api, "editMessageText", {**payload, "message_id": row["cta_message_id"]})
-        else:
-            result = api("sendMessage", payload)
-            with db:
-                db.execute("UPDATE channel_products SET cta_message_id=? WHERE channel_id=? AND message_id=?",
-                           (result["message_id"], row["channel_id"], row["message_id"]))
+    if row["album_id"] and row["cta_message_id"]:
+        apply_edit(api, "editMessageText", {
+            "chat_id": row["channel_id"], "message_id": row["cta_message_id"],
+            "text": text, "entities": json.dumps(entities, ensure_ascii=False),
+            "reply_markup": markup, "link_preview_options": json.dumps({"is_disabled": True})})
 
 
 def known_product(db, channel_id, target, mid):
@@ -125,7 +119,7 @@ def edit_link(db, products, chat_id, target, username, url, *, api, save_product
             lines = raw.splitlines()
             if lines and lines[0].strip() == "LUXEVISTA":
                 lines = [line for line in lines[1:] if line.strip() and not set(line.strip()) <= {'─'}
-                         and line.strip() != "🛍 اطلب الآن | Order now"]
+                         and line.strip() not in {"🛍 اطلب الآن | Order now", "الحد الأدنى: 10 قطع | Minimum: 10 pieces"}]
                 lines = [line.replace("🟨  ", "").replace("  ·  للوحدة | per item", "") for line in lines]
             name, description, price = parse_caption("\n".join(lines))
             sku = next_sku(products, db)

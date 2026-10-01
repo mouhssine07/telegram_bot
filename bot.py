@@ -127,7 +127,12 @@ def product_post_caption(product: dict, bot_username: str, source: str,
     append(f"{product['price_dh']} DH", "bold")
     entities.append({**entities[-1], "type": "text_link",
                      "url": f"https://t.me/{bot_username}?start=p_{product['sku']}_{source}"})
-    append("  ·  للوحدة | per item")
+    append("  ·  للوحدة | per item\n")
+    append("الحد الأدنى: 10 قطع | Minimum: 10 pieces", "italic")
+    append("\n\n────────────────\n")
+    append("🛍 اطلب الآن | Order now", "bold")
+    entities.append({**entities[-1], "type": "text_link",
+                     "url": f"https://t.me/{bot_username}?start=p_{product['sku']}_{source}"})
     if len(caption.encode("utf-16-le")) // 2 > 1024:
         raise RuntimeError("Product caption is too long for the new layout. Shorten its description in /products and preview again.")
     return caption, entities
@@ -389,8 +394,7 @@ def show_product(chat_id: int, product: dict, db: sqlite3.Connection, source: st
         send_product_photos(chat_id, product, db)
     unavailable = shop.stock(db, sku) == 0
     buttons = [[("🔔 Notify me when available | أخبرني عند التوفر", f"restock:{sku}")]] if unavailable else [
-        [("🛒 أضف إلى السلة | Add to basket", f"add:{sku}:{source}")]]
-    buttons.append([("🧺 السلة | Basket", "basket:show")])
+        [("🛍 اطلب الآن | Order now", f"order:{sku}:{source}")]]
     send_order(db, chat_id,
          f"{product['name']}\n{product.get('description', '')}\n\n"
          f"السعر: {product['price_dh']} درهم للوحدة\n"
@@ -410,8 +414,7 @@ def start(chat_id: int, payload: str, products: dict, db: sqlite3.Connection) ->
                     show_product(chat_id, products[sku], db, source, include_photos=True)
                     return
     send_order(db, chat_id, "مرحبا 👋 اختر المنتج:\nللاشتراك في تنبيهات الجديد: /notifications",
-         [[(f"{p['name']} — {p['price_dh']} DH", f"view:{p['sku']}")] for p in products.values()]
-         + [[("🧺 السلة | Basket", "basket:show")]])
+         [[(f"{p['name']} — {p['price_dh']} DH", f"view:{p['sku']}")] for p in products.values()])
 
 
 def publish_album(chat_id: int, media_group_id: str, sku: str, is_publish: bool,
@@ -432,7 +435,7 @@ def publish_album(chat_id: int, media_group_id: str, sku: str, is_publish: bool,
         prior = db.execute("""SELECT cta_message_id FROM published_albums
             WHERE source_chat_id=? AND media_group_id=? AND sku=? AND target_chat_id=?""",
             (chat_id, media_group_id, sku, CHANNEL_ID)).fetchone()
-        if prior and prior["cta_message_id"] is not None:
+        if prior:
             send(chat_id, "This album was already published. Check the channel before posting it again.")
             return
     if not prior:
@@ -444,25 +447,16 @@ def publish_album(chat_id: int, media_group_id: str, sku: str, is_publish: bool,
         result = api("sendMediaGroup", {"chat_id": destination, "media": json.dumps(media, ensure_ascii=False)}, timeout=35)
         message_ids = [message["message_id"] for message in result]
         if is_publish:
-            # Record the album before sending its button, so retrying cannot repost photos.
+            # Record publication so retrying cannot repost photos.
             with db:
                 db.execute("""INSERT INTO published_albums VALUES (?, ?, ?, ?, ?, ?)""",
                            (chat_id, media_group_id, sku, CHANNEL_ID, json.dumps(message_ids), None))
-    product = products[sku]
-    cta = api("sendMessage", {
-        "chat_id": destination,
-        "text": f"{product['name']} — {product['price_dh']} DH\n🛍 اضغط للطلب | Tap to order",
-        "reply_markup": order_link_keyboard(bot_username, sku, "channel" if is_publish else "preview"),
-    })
     if is_publish:
         with db:
-            db.execute("""UPDATE published_albums SET cta_message_id=?
-                WHERE source_chat_id=? AND media_group_id=? AND sku=? AND target_chat_id=?""",
-                       (cta["message_id"], chat_id, media_group_id, sku, CHANNEL_ID))
             shop.queue_arrival(db, sku)
-        send(chat_id, f"✅ Product album in {CHANNEL_ID} now has an Order now button in the message below it.")
+        send(chat_id, f"✅ Product album published to {CHANNEL_ID} with an Order now link in its caption.")
     else:
-        send(chat_id, f"Album preview above ({len(rows)} separate photos). Reply to any photo in the original album with /publish {sku} when ready.")
+        send(chat_id, f"Album preview above ({len(rows)} separate photos). Reply to the original album with /publish {sku} when ready.")
 
 
 def edit_published_product(chat_id, command, products, db, bot_username):
@@ -535,9 +529,8 @@ def edit_published_product(chat_id, command, products, db, bot_username):
     except RuntimeError as exc:
         send(chat_id, f"Cannot update posts: {exc}")
         return
-    markup = order_link_keyboard(bot_username, sku, "channel")
+    markup = json.dumps({"inline_keyboard": []})
     operations = {}
-    missing_buttons = 0
     invalid_records = 0
     for post in posts:
         mid = post["channel_message_id"]
@@ -556,10 +549,9 @@ def edit_published_product(chat_id, command, products, db, bot_username):
             "caption": caption, "caption_entities": json.dumps(entities, ensure_ascii=False)}
         if album["cta_message_id"]:
             operations[("editMessageText", album["cta_message_id"])] = {
-                "text": f"{products[sku]['name']} — {products[sku]['price_dh']} DH\n🛍 اضغط للطلب | Tap to order",
+                "text": caption, "entities": json.dumps(entities, ensure_ascii=False),
+                "link_preview_options": json.dumps({"is_disabled": True}),
                 "reply_markup": markup}
-        else:
-            missing_buttons += 1
     updated = unchanged = 0
     failures = []
     repaired = False
@@ -595,8 +587,6 @@ def edit_published_product(chat_id, command, products, db, bot_username):
         message += f"\nSaved the corrected caption reference. Next time use /edit {sku}."
     if invalid_records:
         message += f"\n{invalid_records} album record(s) have invalid saved message IDs and were skipped."
-    if missing_buttons:
-        message += f"\n{missing_buttons} older album(s) have no recorded button message. Their captions were targeted only."
     send(chat_id, message)
 
 
@@ -787,6 +777,7 @@ def confirm_basket(chat_id, data, products, db):
     order = db.execute("SELECT * FROM orders WHERE id=?", (cursor.lastrowid,)).fetchone()
     try:
         send(ADMIN_CHAT_ID, order_message(order), admin.order_buttons(db, order))
+        send_order_audio(ADMIN_CHAT_ID, order)
     except RuntimeError as exc:
         print(f"Admin notification failed for order #{order['id']}: {exc}", file=sys.stderr)
     send(chat_id, f"✅ تم تسجيل طلبك #{order['id']}.\nOrder saved. View your order: /orders")
@@ -821,7 +812,7 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
         edit_published_product(chat_id, raw, products, db, bot_username)
         return
     if raw == "/basket":
-        basket_callback(chat_id, "basket:show", products, db)
+        start(chat_id, "", products, db)
         return
     if raw.startswith("/start"):
         admin.clear_editor(db, chat_id)
@@ -904,7 +895,7 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
                 "message_id": source_id,
                 "caption": caption,
                 "caption_entities": json.dumps(entities, ensure_ascii=False),
-                "reply_markup": order_link_keyboard(bot_username, sku, "channel" if is_publish else "preview"),
+                "reply_markup": json.dumps({"inline_keyboard": []}),
             })
         except RuntimeError as exc:
             send(chat_id, f"Could not {'publish' if is_publish else 'preview'}: {exc}")
@@ -914,7 +905,7 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
                 db.execute("""INSERT INTO published_posts VALUES (?, ?, ?, ?, ?)""",
                            (chat_id, source_id, sku, CHANNEL_ID, result["message_id"]))
                 shop.queue_arrival(db, sku)
-            send(chat_id, f"✅ Published to {CHANNEL_ID} with an Order now button (message #{result['message_id']}).")
+            send(chat_id, f"✅ Published to {CHANNEL_ID} with an Order now link (message #{result['message_id']}).")
         else:
             send(chat_id, "Preview above. Reply to the same original post with /publish " + sku + " when ready.")
         return
@@ -952,6 +943,17 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
         return
     step, data = current
     remember_order_message(db, chat_id, message["message_id"])
+    if step == "description":
+        media = message.get("voice") or message.get("audio")
+        if media:
+            data["note_audio"] = {"kind": "voice" if message.get("voice") else "audio", "file_id": media["file_id"]}
+        elif raw and len(raw) <= 1000:
+            data["description"] = raw
+        else:
+            send_order(db, chat_id, "أرسل وصفًا حتى 1000 حرف أو رسالة صوتية. | Send text (up to 1000 characters) or audio.")
+            return
+        ask_order_note(chat_id, data, db)
+        return
     value = " ".join(raw.split())
     if not value or len(value) > 150:
         send_order(db, chat_id, "أدخل قيمة صحيحة (حتى 150 حرفًا). أو اكتب /cancel.")
@@ -1018,6 +1020,9 @@ def next_detail(chat_id: int, data: dict, products: dict, db: sqlite3.Connection
             put_session(db, chat_id, field, data)
             send_order(db, chat_id, label + "؟")
             return
+    if not data.get("note_complete") and "items" not in data:
+        ask_order_note(chat_id, data, db)
+        return
     if "items" in data:
         items = basket_quote(chat_id, products, db)
         if not items:
@@ -1030,6 +1035,29 @@ def next_detail(chat_id: int, data: dict, products: dict, db: sqlite3.Connection
         send(chat_id, "هذا المنتج لم يعد متاحًا. اكتب /start لاختيار منتج آخر.")
         return
     review_order(chat_id, products[data["sku"]], data, db)
+
+
+def note_summary(data):
+    return ("وصف الطلب | Order description: " + (data.get("description") or "—")
+            + ("\n🎤 رسالة صوتية مرفقة | Audio attached" if data.get("note_audio") else ""))
+
+
+def ask_order_note(chat_id, data, db):
+    message = send_order(db, chat_id,
+        "وصف الطلب (اختياري): اكتب الألوان أو التفاصيل المطلوبة، أو أرسل رسالة صوتية. يمكنك إرسال الاثنين. النص أو الصوت الجديد يعوض السابق.\n"
+        "Order description (optional): send text, a voice message, or both. New text/audio replaces the previous one.\n\n"
+        + note_summary(data), [[("✅ متابعة / تخطي | Continue / Skip", "note:done")],
+                               [("🗑 مسح الوصف والصوت | Clear note", "note:clear")]])
+    data["note_message_id"] = message["message_id"]
+    put_session(db, chat_id, "description", data)
+
+
+def send_order_audio(chat_id, order):
+    if order["note_audio_json"]:
+        audio = json.loads(order["note_audio_json"])
+        api("sendVoice" if audio["kind"] == "voice" else "sendAudio",
+            {"chat_id": chat_id, audio["kind"]: audio["file_id"],
+             "caption": f"🎤 Order #{order['id']} — {order['customer_name']}"})
 
 
 def show_saved_details(chat_id: int, data: dict, db: sqlite3.Connection) -> None:
@@ -1066,9 +1094,9 @@ def review_order(chat_id: int, p: dict, data: dict, db: sqlite3.Connection) -> N
          f"المجموع: {p['price_dh'] * data['quantity']} درهم (بدون التوصيل)\n"
          f"الاسم: {data['name']}\nالهاتف: {data['phone']}\n"
          f"المدينة: {data['city']}\nالعنوان: {data['address']}\n\n"
-         "بالضغط على تأكيد، سترسل بياناتك إلى البائع لمتابعة الطلب.",
+         + note_summary(data) + "\n\nبالضغط على تأكيد، سترسل بياناتك إلى البائع لمتابعة الطلب.",
          [[("✅ تأكيد الطلب", "confirm"), ("❌ إلغاء", "cancel")],
-          [("✏️ تعديل بيانات التوصيل", "details:edit")]])
+          [("✏️ تعديل بيانات التوصيل", "details:edit"), ("✏️ وصف الطلب", "note:edit")]])
     data["confirm_message_id"] = message["message_id"]
     put_session(db, chat_id, "confirm", data)
 
@@ -1100,7 +1128,9 @@ def order_message(order: sqlite3.Row) -> str:
             f"المجموع بدون التوصيل: {admin.order_total(order)} DH\n"
             f"الاسم: {order['customer_name']}\nالهاتف: {order['phone']}\n"
             f"المدينة: {order['city']}\nالعنوان: {order['address']}\n"
-            f"المصدر: {order['source']}\nالتاريخ (UTC): {order['created_at']}")
+            f"وصف الطلب | Order description: {order['description'] or '—'}\n"
+            + ("🎤 Audio attached\n" if order["note_audio_json"] else "")
+            + f"المصدر: {order['source']}\nالتاريخ (UTC): {order['created_at']}")
 
 
 def delete_order(chat_id: int, command: str, db: sqlite3.Connection) -> None:
@@ -1167,7 +1197,35 @@ def handle_callback(callback: dict, products: dict, db: sqlite3.Connection) -> N
         return
     if shop.notification_callback(db, products, chat_id, command, send):
         return
-    if basket_callback(chat_id, command, products, db):
+    if command.startswith("add:"):
+        command = "order:" + command[4:]
+    elif command.startswith("basket:"):
+        start(chat_id, "", products, db)
+        return
+    if command.startswith("audio:"):
+        if admin.is_admin(db, ADMIN_CHAT_ID, chat_id):
+            order = db.execute("SELECT * FROM orders WHERE admin_key=?", (command[6:],)).fetchone()
+            if order:
+                send_order_audio(chat_id, order)
+        return
+    if command in {"note:done", "note:edit", "note:clear"}:
+        current = session(db, chat_id)
+        if not current:
+            return
+        step, data = current
+        expected = data.get("note_message_id" if step == "description" else "confirm_message_id")
+        if callback["message"]["message_id"] != expected:
+            return
+        if command == "note:done" and step == "description":
+            data["note_complete"] = True
+            next_detail(chat_id, data, products, db)
+        elif command == "note:edit" and step == "confirm":
+            data.pop("note_complete", None)
+            ask_order_note(chat_id, data, db)
+        elif command == "note:clear" and step == "description":
+            data.pop("description", None)
+            data.pop("note_audio", None)
+            ask_order_note(chat_id, data, db)
         return
     if command.startswith("view:"):
         sku = command[5:]
@@ -1244,14 +1302,16 @@ def handle_callback(callback: dict, products: dict, db: sqlite3.Connection) -> N
     with db:
         cursor = db.execute("""INSERT INTO orders
             (chat_id, sku, product_name, unit_price_dh, quantity,
-             customer_name, phone, city, address, source, admin_key)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             customer_name, phone, city, address, source, admin_key, description, note_audio_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (chat_id, p["sku"], p["name"], p["price_dh"], data["quantity"],
-             data["name"], data["phone"], data["city"], data["address"], data["source"], admin.uuid.uuid4().hex))
+             data["name"], data["phone"], data["city"], data["address"], data["source"], admin.uuid.uuid4().hex,
+             data.get("description", ""), json.dumps(data["note_audio"]) if data.get("note_audio") else None))
         db.execute("DELETE FROM sessions WHERE chat_id=?", (chat_id,))
     order = db.execute("SELECT * FROM orders WHERE id=?", (cursor.lastrowid,)).fetchone()
     try:
         send(ADMIN_CHAT_ID, order_message(order), admin.order_buttons(db, order))
+        send_order_audio(ADMIN_CHAT_ID, order)
     except RuntimeError as exc:
         print(f"Admin notification failed for order #{order['id']}: {exc}", file=sys.stderr)
     send(chat_id, f"✅ تم تسجيل طلبك #{order['id']}. سنتواصل معك لتأكيد التوصيل.\n\n"

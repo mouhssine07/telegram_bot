@@ -48,7 +48,8 @@ class ChannelLinkTests(BotTestCase):
         method, data = self.edits()[0]
         self.assertEqual((method, data['chat_id'], data['message_id']), ('editMessageCaption', '-1001234', 713))
         self.assertIn('LUXEVISTA', data['caption'])
-        self.assertIn('p_p0002_channel', data['reply_markup'])
+        self.assertIn('p_p0002_channel', data['caption_entities'])
+        self.assertEqual(json.loads(data['reply_markup'])['inline_keyboard'], [])
         self.assertFalse(any(m in ('copyMessage', 'deleteMessage', 'sendMediaGroup') for m, d in self.calls))
         forwards = [d for m, d in self.calls if m == 'forwardMessage']
         self.assertEqual(forwards[0]['chat_id'], 999)
@@ -84,15 +85,15 @@ class ChannelLinkTests(BotTestCase):
         self.text(101, '/start p_p0002_channel')
         self.assertTrue(any(m == 'sendVideo' and d['video'] == 'watch-video' for m, d in self.calls))
 
-    def test_album_creates_one_button_and_reuses_it(self):
+    def test_album_uses_caption_link_without_creating_button(self):
         self.original['media_group_id'] = 'album1'
         self.edit()
         first = self.imported()['cta_message_id']
-        self.assertIsNotNone(first)
+        self.assertIsNone(first)
         self.edit()
         self.assertNotIn('reply_markup', self.edits()[0][1])
-        self.assertEqual(self.edits()[-1][1]['message_id'], first)
-        self.assertEqual(sum(m == 'sendMessage' and d['chat_id'] == '-1001234' for m, d in self.calls), 1)
+        self.assertEqual(self.edits()[-1][1]['message_id'], 713)
+        self.assertEqual(sum(m == 'sendMessage' and d['chat_id'] == '-1001234' for m, d in self.calls), 0)
 
     def test_existing_bot_post_reuses_sku_and_saved_product_details(self):
         self.db.execute("INSERT INTO published_posts VALUES (999, 1, 'p0001', '@channel', 713)")
@@ -164,7 +165,7 @@ class ChannelLinkTests(BotTestCase):
         self.assertEqual(self.products['p0002']['name'], 'Gold watch')
         self.assertEqual(self.edits()[0][1]['caption'].count('LUXEVISTA'), 1)
 
-    def test_album_button_failure_can_resume_without_duplicate_product(self):
+    def test_album_does_not_depend_on_separate_message_permission(self):
         self.original['media_group_id'] = 'album1'
         channel_failures = [True]
         def fail_button(method, data=None, timeout=15):
@@ -174,10 +175,10 @@ class ChannelLinkTests(BotTestCase):
         self.bot.api = fail_button
         self.edit()
         self.assertIsNone(self.imported()['cta_message_id'])
-        self.assertIn('p0002 is saved', self.sent_text())
+        self.assertIn('Post updated in place', self.sent_text())
         channel_failures[0] = False
         self.edit()
-        self.assertIsNotNone(self.imported()['cta_message_id'])
+        self.assertIsNone(self.imported()['cta_message_id'])
         self.assertEqual(len(self.bot.load_products()), 2)
 
     def test_sku_update_keeps_other_existing_publications_current(self):

@@ -5,6 +5,14 @@ from test_bot import BotTestCase
 
 
 class BasketTests(BotTestCase):
+    # Exercise retained legacy basket helpers directly. New customer routing is
+    # covered by test_order_notes and no longer exposes these entry points.
+    def callback(self, chat_id, data, message_id):
+        if data.startswith(("add:", "basket:")):
+            self.bot.basket_callback(chat_id, data, self.products, self.db)
+        else:
+            super().callback(chat_id, data, message_id)
+
     def setUp(self):
         super().setUp()
         self.products['p0002'] = {'sku': 'p0002', 'name': 'Second watch', 'price_dh': 80}
@@ -116,7 +124,7 @@ class BasketTests(BotTestCase):
         self.db.close()
         self.db = self.bot.connect()
         self.assertEqual(len(self.bot.basket_rows(self.db, 101)), 3)
-        self.text(101, '/basket')
+        self.bot.show_basket(101, self.products, self.db)
         self.assertIn('870 DH', self.calls[-1][1]['text'])
 
     def test_quantity_validation_and_total_limit(self):

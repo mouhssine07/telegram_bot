@@ -16,6 +16,10 @@ FIELDS = {"name": "name", "price_dh": "price in whole DH", "description": "descr
 def init_schema(db):
     with db:
         columns = {row["name"] for row in db.execute("PRAGMA table_info(orders)")}
+        if "description" not in columns:
+            db.execute("ALTER TABLE orders ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+        if "note_audio_json" not in columns:
+            db.execute("ALTER TABLE orders ADD COLUMN note_audio_json TEXT")
         if "admin_key" not in columns:
             db.execute("ALTER TABLE orders ADD COLUMN admin_key TEXT")
         if "status_version" not in columns:
@@ -75,7 +79,10 @@ def order_buttons(db, order):
         key = db.execute("SELECT admin_key FROM orders WHERE id=?", (order["id"],)).fetchone()[0]
     choices = [(label, f"adm:s:{key}:{order['status_version']}:{status}")
                for status, label in STATUSES.items() if status != order["status"]]
-    return [choices[index:index + 2] for index in range(0, len(choices), 2)]
+    rows = [choices[index:index + 2] for index in range(0, len(choices), 2)]
+    if order["note_audio_json"]:
+        rows.append([("🎤 Play order audio", f"audio:{key}")])
+    return rows
 
 
 def clear_editor(db, chat_id):

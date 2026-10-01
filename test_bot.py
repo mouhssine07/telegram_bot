@@ -53,6 +53,7 @@ class BotTestCase(unittest.TestCase):
         self.callback(chat_id, "order:p0001:channel", self.next_id)
         for message_id, value in enumerate(["10", "Customer X", "0612345678", "Rabat", "Test street"], 2):
             self.text(chat_id, value, message_id)
+        self.callback(chat_id, "note:done", self.next_id)
         return self.next_id
 
     def insert_order(self, chat_id, name):
@@ -77,7 +78,7 @@ class OrderFlowTests(BotTestCase):
         self.assertEqual((photo["chat_id"], photo["from_chat_id"], photo["message_id"]), (101, "@channel", 77))
         self.assertEqual(photo["caption"], "Test watch")
         self.assertEqual(json.loads(photo["reply_markup"]), {"inline_keyboard": []})
-        self.assertIn("add:p0001:channel", self.calls[-1][1]["reply_markup"])
+        self.assertIn("order:p0001:channel", self.calls[-1][1]["reply_markup"])
 
     def test_channel_link_reuses_album_photos_in_original_order_after_restart(self):
         self.db.execute("INSERT INTO published_albums VALUES (999, 'a', 'p0001', '@channel', '[70,71]', NULL)")
@@ -92,7 +93,7 @@ class OrderFlowTests(BotTestCase):
         self.assertEqual([p["media"] for p in media], ["photo-5", "photo-6"])
         self.assertEqual(media[0]["caption"], "Test watch")
         self.assertNotIn("caption", media[1])
-        self.assertIn("add:p0001:channel", self.calls[-1][1]["reply_markup"])
+        self.assertIn("order:p0001:channel", self.calls[-1][1]["reply_markup"])
 
     def test_legacy_album_uses_channel_copy_and_missing_media_does_not_block_ordering(self):
         self.db.execute("INSERT INTO published_albums VALUES (999, 'a', 'p0001', '@channel', '[70,71]', NULL)")
@@ -107,7 +108,7 @@ class OrderFlowTests(BotTestCase):
             return self.api(method, data, timeout)
         self.bot.api = fail_media
         self.text(101, "/start p_p0001_channel")
-        self.assertIn("add:p0001:channel", self.calls[-1][1]["reply_markup"])
+        self.assertIn("order:p0001:channel", self.calls[-1][1]["reply_markup"])
         self.callback(101, "order:p0001:channel", self.next_id)
         self.assertEqual(self.bot.session(self.db, 101)[0], "quantity")
 
@@ -172,6 +173,7 @@ class OrderFlowTests(BotTestCase):
         self.db.close()
         self.db = self.bot.connect()
         self.callback(101, "details:use", data["details_message_id"])
+        self.callback(101, "note:done", self.next_id)
         self.assertEqual(self.bot.session(self.db, 101)[0], "confirm")
         self.callback(101, "confirm", self.next_id)
         order = self.db.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 1").fetchone()
@@ -189,6 +191,7 @@ class OrderFlowTests(BotTestCase):
         self.callback(101, "details:use", old_id)
         self.assertEqual(self.bot.session(self.db, 101)[0], "details")
         self.callback(101, "details:use", new_id)
+        self.callback(101, "note:done", self.next_id)
         summary_id = self.next_id
         self.callback(101, "details:edit", summary_id)
         self.callback(101, "details:city", self.next_id)
@@ -209,6 +212,7 @@ class OrderFlowTests(BotTestCase):
         self.callback(101, "details:use", self.next_id)
         self.assertEqual(self.bot.session(self.db, 101)[0], "address")
         self.text(101, "New address")
+        self.callback(101, "note:done", self.next_id)
         self.assertEqual(self.bot.session(self.db, 101)[0], "confirm")
         self.text(101, "/cancel")
         self.assertEqual(self.db.execute("SELECT address FROM orders").fetchone()[0], "")
@@ -225,8 +229,8 @@ class OrderFlowTests(BotTestCase):
         self.assertIn("🟨", caption)
         self.assertNotIn("Delivery fee", caption)
         self.assertNotIn("رسوم التوصيل", caption)
-        self.assertNotIn("Minimum: 10 pieces", caption)
-        self.assertNotIn("الحد الأدنى", caption)
+        self.assertIn("Minimum: 10 pieces", caption)
+        self.assertIn("الحد الأدنى", caption)
         self.assertNotIn("120", caption)
         self.assertIn("LUXEVISTA", caption)
         encoded = caption.encode("utf-16-le")
@@ -234,7 +238,7 @@ class OrderFlowTests(BotTestCase):
         self.assertIn("⌚ ساعة", labels)
         self.assertTrue(any(label == "150 DH" and entity["type"] == "text_link"
                             for label, entity in zip(labels, entities)))
-        self.assertNotIn("Order now", caption)
+        self.assertIn("Order now", caption)
         product["description"] = "⌚" * 1100
         with self.assertRaisesRegex(RuntimeError, "too long"):
             self.bot.product_post_caption(product, "TestBot", "channel", album=True)
@@ -673,7 +677,8 @@ class NotificationTests(BotTestCase):
         self.assertIn("LUXEVISTA", copies[-1]["caption"])
         self.assertEqual(copies[0]["caption"], copies[-1]["caption"])
         self.assertTrue(json.loads(copies[-1]["caption_entities"]))
-        self.assertIn("url", json.loads(copies[-1]["reply_markup"])["inline_keyboard"][0][0])
+        self.assertEqual(json.loads(copies[-1]["reply_markup"])["inline_keyboard"], [])
+        self.assertIn("p_p0001_channel", copies[-1]["caption_entities"])
 
     def test_album_publish_keeps_album_flow_and_queues_arrival(self):
         self.bot.CHANNEL_ID = "@testchannel"
@@ -700,17 +705,14 @@ class NotificationTests(BotTestCase):
         self.assertIn("LUXEVISTA", media[0]["caption"])
         self.assertEqual(media[0]["caption_entities"][-1]["type"], "text_link")
         ctas = [data for method, data in self.calls if method == "sendMessage" and data["chat_id"] == "@testchannel"]
-        self.assertEqual(len(ctas), 1)
-        button = json.loads(ctas[0]["reply_markup"])["inline_keyboard"][0][0]
-        self.assertEqual(button["url"], "https://t.me/TestBot?start=p_p0001_channel")
-        self.assertIn("Order now", button["text"])
-        self.assertNotIn("Order now", media[0]["caption"])
-        self.assertIsNotNone(self.db.execute("SELECT cta_message_id FROM published_albums").fetchone()[0])
+        self.assertEqual(ctas, [])
+        self.assertIn("Order now", media[0]["caption"])
+        self.assertIsNone(self.db.execute("SELECT cta_message_id FROM published_albums").fetchone()[0])
         self.bot.publish_album(999, "album", "p0001", True, self.products, self.db, "TestBot")
         self.assertEqual(sum(method == "sendMediaGroup" for method, data in self.calls), 2)
-        self.assertEqual(sum(method == "sendMessage" and data["chat_id"] == "@testchannel" for method, data in self.calls), 1)
+        self.assertEqual(sum(method == "sendMessage" and data["chat_id"] == "@testchannel" for method, data in self.calls), 0)
 
-    def test_album_button_failure_retries_without_reposting_photos(self):
+    def test_album_needs_no_separate_button_and_retry_does_not_repost(self):
         self.bot.CHANNEL_ID = "@testchannel"
         for mid in [5, 6]:
             self.db.execute("INSERT INTO album_items VALUES (999, 'album', ?, ?, ?, NULL)",
@@ -725,13 +727,12 @@ class NotificationTests(BotTestCase):
                 raise RuntimeError("Temporary failure")
             return self.api(method, data, timeout)
         self.bot.api = album_api
-        with self.assertRaisesRegex(RuntimeError, "Temporary failure"):
-            self.bot.publish_album(999, "album", "p0001", True, self.products, self.db, "TestBot")
+        self.bot.publish_album(999, "album", "p0001", True, self.products, self.db, "TestBot")
         self.assertIsNone(self.db.execute("SELECT cta_message_id FROM published_albums").fetchone()[0])
         fail_button = False
         self.bot.publish_album(999, "album", "p0001", True, self.products, self.db, "TestBot")
         self.assertEqual(sum(method == "sendMediaGroup" for method, data in self.calls), 1)
-        self.assertIsNotNone(self.db.execute("SELECT cta_message_id FROM published_albums").fetchone()[0])
+        self.assertIsNone(self.db.execute("SELECT cta_message_id FROM published_albums").fetchone()[0])
 
     def test_existing_published_products_are_not_reannounced_after_upgrade(self):
         self.db.execute("INSERT INTO published_posts VALUES (999, 1, 'p0001', '@test', 5)")

@@ -30,8 +30,8 @@ class PostEditTests(BotTestCase):
         self.assertEqual((method, data['chat_id'], data['message_id']), ('editMessageCaption', '@channel', 50))
         for value in ('New watch', 'New description', '190 DH'):
             self.assertIn(value, data['caption'])
-        button = json.loads(data['reply_markup'])['inline_keyboard'][0][0]
-        self.assertEqual(button['url'], 'https://t.me/TestBot?start=p_p0001_channel')
+        self.assertEqual(json.loads(data['reply_markup'])['inline_keyboard'], [])
+        self.assertIn('https://t.me/TestBot?start=p_p0001_channel', data['caption_entities'])
         self.assertEqual(self.db.execute('SELECT channel_message_id FROM published_posts').fetchone()[0], 50)
         self.assertEqual(self.db.execute('SELECT count(*) FROM notification_jobs').fetchone()[0], 0)
         self.assert_no_republication()
@@ -105,7 +105,7 @@ class PostEditTests(BotTestCase):
         self.db.commit()
         self.text(999, '/edit p0001')
         self.assertEqual([d['message_id'] for m, d in self.edits()], [70])
-        self.assertIn('no recorded button', self.sent_text())
+        self.assertNotIn('no recorded button', self.sent_text())
         self.assertIn('invalid saved message IDs', self.sent_text())
         self.assert_no_republication()
 

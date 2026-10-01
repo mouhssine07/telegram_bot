@@ -1,6 +1,6 @@
 # LuxeVista Telegram shop bot
 
-This bot supports a small product catalog, a private order form, SQLite order storage, an admin alert, `/orders`, tracked product links, and channel posts with an **Order now** button. It uses Python 3.10+ and the standard library. No hosting is needed to try it on your own computer; keep the process running to receive orders.
+This bot supports a small product catalog, a private order form, SQLite order storage, an admin alert, `/orders`, tracked product links, and channel posts with a styled **Order now** caption link. It uses Python 3.10+ and the standard library. No hosting is needed to try it on your own computer; keep the process running to receive orders.
 
 ## Set up (Windows PowerShell)
 
@@ -34,20 +34,18 @@ Fill in the placeholders in your local `.env` privately before starting. The sam
 
 6. In your private chat with the bot, send `/link bv001 channel`. Put the returned link in the caption of the corresponding product post in your channel. Test the entire flow yourself before posting the link publicly. For an ad, create a separate source, e.g. `/link bv001 tgad1`.
 
-## Publish a product with an Order now button
+## Publish a product with an Order now link
 
 1. Add `CHANNEL_ID=@YourChannelUsername` to `.env` (for a private channel, use its numeric chat ID instead). Restart the bot after changing `.env`.
 2. Add your bot as an **administrator** of the channel with **Post Messages** permission. This is necessary for it to publish posts.
 3. From the configured admin's private chat, send a photo or several photos together as one album. Start its caption with the product name and include one clear whole-DH price. The bot imports the product and returns an automatic SKU such as `p0001`.
 4. **Reply to the original photo or any photo in its album** with `/preview`. The SKU is inferred from the import; an explicit SKU is also supported, e.g. `/preview p0001`.
-5. Reply to the original photo or album with `/publish`. Single photos have a native **Order now | اطلب الآن** button. Albums remain separate photos in one album, followed by a short product message carrying the same native button. Telegram's `sendMediaGroup` method has no inline-keyboard field, so the album button is on this following message. The caption no longer contains an Order now text link. Duplicate publishing of the same original and SKU is prevented.
+5. Reply to the original photo or album with `/publish`. The styled **Order now** text in the caption links to the product. Albums keep their grouping and photo order, with the caption on the first photo. No separate button message is created. Duplicate publication is prevented.
+6. Tap the caption link and complete a test order, including a text description and/or voice message. Check the admin chat for the saved order and playable audio.
 
-If sending an album's button fails after the photos were published, repeat `/publish` on the original album: the bot retries the button without reposting the photos. Repeating `/publish` on an older recorded album without a button also adds a button message at the bottom of the channel; it does not rewrite the older caption or move the message next to the old album. Existing posts are not automatically edited. `/preview` shows the new album-plus-button layout privately.
-6. Tap the button on the new channel post and complete a test order. The admin notification should show `source: channel`.
+The LuxeVista layout includes its brand header, bold product name, description, linked price with a gold accent, 10-piece minimum, divider, and bold Order now link. Arabic and emoji use Telegram UTF-16 entity offsets. Shorten the description if the caption exceeds Telegram's limit.
 
-New previews and publications use a consistent LuxeVista caption: brand header, bold product name, description, and bold linked catalog price with a gold accent. Ordering uses the native button. Delivery-fee and minimum-order notes are omitted from channel captions; the 10-piece minimum still applies during checkout. Telegram captions do not support arbitrary font colors; the linked price uses the viewer's Telegram link styling. Imported name/price repetitions are removed from the description. Photos and album order stay unchanged; the album caption remains on its first photo. Captions use Telegram text entities, including correct Arabic/emoji offsets. If the layout exceeds the caption limit, shorten the description in `/products` and preview again. Custom formatting from the original caption is replaced by this layout.
-
-The bot creates a new channel post. It cannot reliably add a button to an existing post you published manually. If the new post replaces an old one, review it first and then remove the old post yourself if you want to avoid duplicates. Publishing is only triggered by your explicit `/publish` command.
+Existing channel posts are not automatically changed. After restarting the bot, use `/edit SKU` to update recorded posts in place and remove their buttons. Existing separate album button messages are converted to linked text; they are not deleted. Albums without separate messages need only their caption updated. For a manually published post, use `/edit TELEGRAM_POST_LINK`. `/preview` lets you inspect the layout privately.
 
 You can also edit `products.json` to set the SKU, name, description, and **unit price**. The bot reloads the catalog before processing private messages, callbacks, and queued notifications, removing stale import mappings. Deleted SKU gaps can be reused unless reserved by published posts, saved/deleted orders, generated links, or stock/notification setup. Replace `bv001` with your actual SKU in `/link`. Delivery charges need manual confirmation. Stock is managed using `/stock`, as described below.
 
@@ -55,8 +53,8 @@ You can also edit `products.json` to set the SKU, name, description, and **unit 
 
 | Command | Use |
 | --- | --- |
-| `/start` | Open catalog; the basket is preserved. |
-| `/basket` | View the mixed-model basket, edit/remove items, or check out. |
+| `/start` | Open the product catalog. |
+| `/basket` | Compatibility shortcut to the catalog; new orders use direct checkout. |
 | `/id` | Show your own chat ID for configuration. |
 | `/cancel` | Cancel the active form. |
 | `/admin` | Owner/team: open the private admin panel. |
@@ -71,7 +69,7 @@ You can also edit `products.json` to set the SKU, name, description, and **unit 
 | `/orders 2` | Show the next page of older orders; the same ownership restrictions apply on every page. |
 | `/confirm 2` | Owner/team: confirm order #2 and send its customer an Arabic and English confirmation. |
 | `/delete 2` | Main admin only: permanently delete order #2 and renumber remaining orders from 1. |
-| `/preview SKU` | Admin: reply to a prepared product post to preview it with an order button. |
+| `/preview SKU` | Admin: reply to a prepared product post to preview it with an order link. |
 | `/publish SKU` | Admin: reply to a prepared product post to publish it in the channel. |
 | `/edit SKU` | Owner/team: update all recorded posts for this product in the configured channel, using its saved catalog details. No reply needed. |
 | `/edit TELEGRAM_POST_LINK` | Owner/team: read a channel product post, import it under an automatic SKU, and apply LuxeVista formatting in place. Works for supported posts published manually too. |
@@ -90,13 +88,13 @@ Orders are stored in `orders.sqlite3` in this folder unless `BOT_DB_PATH` is set
 
 Opening a product's Order now link or selecting it in the catalog shows its recorded photo or complete photo album in the customer's private chat, followed by current product details and the order button. Album photos retain their original order and grouping. Existing publication/import records are reused, including older channel posts, without republishing anything. Photos remain in the chat after checkout cleanup so the customer can refer back to the product. If media cannot be loaded, the bot explains this and still allows checkout; catalog-only products without recorded media continue to show text details.
 
-New orders use a **mixed-model basket with 10 to 1000 pieces in total**. For example, 4 pieces of one watch, 3 of another, and 3 of a third meet the minimum. Each model can contribute as little as one piece. A basket supports up to 20 different models.
+New orders use direct single-product checkout: **Order now -> quantity (10-1000) -> customer delivery details -> optional order description -> review -> confirm**. Add to basket and Basket controls are removed. Old Add to basket buttons start direct checkout; old basket navigation returns to the catalog. Existing mixed orders and saved prices remain readable, and already-running legacy basket checkouts retain their compatibility helpers.
 
-Open a product and tap **Add to basket**, then enter its desired quantity. Adding an existing model sets its quantity rather than incrementing it. Choose **Continue shopping** to add other models, or `/basket` to edit quantities, remove models, and check out. Entering 0 removes a model. The basket survives restarts, `/start`, and `/cancel`; cancellation stops checkout but preserves the basket. Opening or editing the basket invalidates an earlier checkout confirmation.
+The description accepts up to 1000 characters, one Telegram voice message or audio file, or both text and audio. Customers can specify colors or other preferences, skip this step, edit it from review, or clear it. Sending new text replaces the text; new audio replaces the audio. Notes are specific to the order and are never reused from a customer's previous order.
 
-Checkout collects delivery details once and saves one order number containing all models, quantities, saved prices, subtotals, and link sources. Both customer history and admin cards show every item. Sales totals count the basket as one order and sum all its units and saved item values. Changing a product name or price after the review requires a fresh confirmation. Stock and product availability are checked again at submission. Existing orders remain readable, and unfinished legacy single-product forms and old private order buttons retain their previous single-product behavior.
+The admin receives the description on the order card and the audio as a playable message labeled with the order number. Admin/team order cards include **Play order audio** for later replay, including after a restart or order renumbering. Playback requires current admin access. The database stores the audio file ID for reuse through Telegram's [sendVoice](https://core.telegram.org/bots/api#sendvoice) or [sendAudio](https://core.telegram.org/bots/api#sendaudio). If audio delivery fails, the order stays saved and the admin can replay it from `/orders`. Database columns are added automatically on restart; existing orders are preserved.
 
-Basket support does not reserve or deduct stock automatically. Delivery remains excluded from the total. Existing order-number renumbering behavior is unchanged.
+Stock remains manual and delivery is excluded from totals.
 
 After quantity selection, returning customers see their name, phone, city, and address from their latest saved order for the same Telegram account. They can continue with these details or edit just one field at a time. Missing or invalid details are requested before the final review. New customers complete the usual form, and everyone can edit delivery details from the review screen. Arabic guidance explains that reuse does not submit an order: final confirmation is still required. Edited details become available for future orders only after the new order is submitted; cancellation leaves previous orders unchanged. No extra profile database is created, and historical order details are preserved. If all of a customer's orders are permanently deleted, they enter their details again.
 
@@ -128,15 +126,15 @@ Buttons use an internal permanent reference, so `/delete` renumbering cannot red
 
 **Products:** open Products & stock, choose a product, then tap Edit name, Edit price, Edit description, Set stock, or Set categories. Send the new value as your next text message. `/cancel`, `/start`, or navigating elsewhere in the panel stops the pending edit. Names allow 1–100 characters, descriptions up to 950, and prices/stock whole numbers from 0 to 999999. Use `-` to clear a description or `none` to clear categories. A conflicting catalog/stock change while editing requires reopening the editor, protecting edits made by another teammate or in `products.json`.
 
-Add product uses the same photo/album import flow and automatic SKU protection as before. Catalog edits keep the SKU and extra product fields, and preserve other products and saved order prices. After saving a name, price, or description in `/products`, send `/edit SKU` (for example `/edit p0003`) to apply the current catalog details to existing channel posts. This updates all recorded publications for that SKU in the configured `CHANNEL_ID`, including posts published by teammates. Single-photo captions and buttons are edited in place. Albums update their first photo's caption and their existing separate button message. Photos, message IDs, and post positions are preserved; no posts are deleted or republished, and no arrival announcements are queued. Original import captions are not changed.
+Add product uses the same photo/album import flow and automatic SKU protection as before. Catalog edits keep the SKU and extra product fields, and preserve other products and saved order prices. After saving a name, price, or description in `/products`, send `/edit SKU` (for example `/edit p0003`) to apply the current catalog details to existing channel posts. This updates all recorded publications for that SKU in the configured `CHANNEL_ID`, including posts published by teammates. Single-photo captions are edited in place and their buttons cleared. Albums update their first caption and convert any existing separate button message to linked text. Photos, message IDs, and post positions are preserved; no posts are deleted or republished, and no arrival announcements are queued. Original import captions are not changed.
 
-Repeated `/edit` is safe when the content is already current. If a message was deleted, permissions were lost, or a network request failed, the bot reports partial results; retry `/edit SKU` after resolving the issue. Older albums with no saved button message receive caption updates only, with a notice that the button is missing. `/edit` does not create that missing message or discover manually published posts. Changing `CHANNEL_ID` to a different identifier also requires matching saved publication records.
+Repeated `/edit` is safe when the content is already current. If a message was deleted, permissions were lost, or a network request failed, the bot reports partial results; retry `/edit SKU` after resolving the issue. Older albums with no saved button message receive caption updates only; no extra message is needed. Changing `CHANNEL_ID` to a different identifier also requires matching saved publication records.
 
 If the saved caption reference is wrong but the actual post still exists, use its Telegram Copy Link URL: `/edit p0003 https://t.me/yourchannel/872`. Public and private (`https://t.me/c/.../...`) post links are supported. The bot verifies that the link belongs to the configured channel, requires exactly one recorded publication for that product, and saves the corrected reference only after a successful or already-current edit. Future `/edit SKU` calls then use the repaired caption reference. It does not recreate deleted posts, replace album media records, or repair a missing separate button message.
 
 **Import and format any existing product post by link:** send `/edit https://t.me/yourchannel/713` in the private admin chat. No SKU is required. The bot must be an administrator with **Edit Messages** enabled in the configured channel. It forwards a private copy to the requesting admin to read the original content, extracts the name, description and a single unambiguous whole-DH price, assigns an automatic SKU, saves the catalog product, and edits the original message using the current LuxeVista layout. It does not delete or republish the product post. Supported posts are photos, videos and text. Posts without a clear price, inaccessible/deleted posts, and posts protected from forwarding cannot be imported this way. When several different DH amounts appear (for example price plus delivery), clarify the original price before retrying.
 
-For an album, copy the link of the photo carrying its caption. The other album photos stay as they are; the Bot API does not enumerate the album from that single link, so a newly imported product's private preview uses the selected photo. If no separate order-button message is recorded, one is added at the bottom of the channel and saved for future edits. This new button message cannot be inserted next to an older album. Text and standalone photo/video posts receive a button on the original message.
+For an album, copy the link of the photo carrying its caption. The other album photos stay as they are; the Bot API does not enumerate the album from that single link, so a newly imported product's private preview uses the selected photo. The Order now link is embedded in the caption. Text and standalone photo/video posts also use a text link, with any previous button removed.
 
 Repeating the same link reuses its SKU and applies the current saved catalog details. Change those details in `/products` first if needed. Known bot publications also reuse their existing SKU. If the catalog was saved but a Telegram edit failed, the bot reports this and retrying the same link resumes without creating a second product. The original message and the catalog cannot be updated in a single atomic transaction; a failed Telegram edit can leave a saved product awaiting its post update. Link imports do not queue arrival notifications. Keep `channel_posts.py` alongside the other Python modules when deploying.
 
@@ -165,7 +163,7 @@ When an unavailable product is opened from a channel link or the catalog, the bo
 
 For arrivals, customers open `/notifications` and explicitly subscribe to **All arrivals**, **women's watches** (`women`), **men's watches** (`men`), or **new collections** (`collections`). You can also create category keys with `/category SKU summer_2026`; these become choices in the menu. A product can have up to five categories. Keys use lowercase letters, digits, underscores or hyphens, start with a letter, and have at most 24 characters. `all` is reserved for All arrivals; `none` clears a product's categories.
 
-Import the product as usual, set its stock and categories, then reply to its original photo or album with `/publish`. The first successful publication queues arrivals for customers already subscribed to a matching category or All arrivals. Overlapping subscriptions produce just one arrival alert per product/customer. Imports and previews never announce a product. Later category changes, repeat publishing, repeated `/announce`, and new subscriptions do not resend the original announcement. Existing recorded publications are treated as already announced on upgrade. `/announce SKU` is an alternative for a product that has not yet been announced; it does not post to the channel. Published products use native order buttons, including a separate button message following albums.
+Import the product as usual, set its stock and categories, then reply to its original photo or album with `/publish`. The first successful publication queues arrivals for customers already subscribed to a matching category or All arrivals. Overlapping subscriptions produce just one arrival alert per product/customer. Imports and previews never announce a product. Later category changes, repeat publishing, repeated `/announce`, and new subscriptions do not resend the original announcement. Existing recorded publications are treated as already announced on upgrade. `/announce SKU` is an alternative for a product that has not yet been announced; it does not post to the channel. Published products use styled Order now links inside their captions.
 
 Subscriptions are off by default. Placing an order or opening `/notifications` does not opt a customer in. Every alert offers an **all notifications off** button and `/notifications` instructions. Opting out also cancels queued alerts. The sender rechecks consent and product availability just before delivery. Alerts for an unavailable product wait until it is available; removed products are skipped. SKUs used for stock, categories, or notification requests are reserved against automatic reuse, so old requests and links cannot move to a different watch.
 
@@ -176,7 +174,7 @@ Alerts are delivered while `python bot.py` is running. The queue survives restar
 1. Run the offline tests from this folder. They use temporary files and a simulated Telegram API, without reading your real `.env`, changing your real catalog/database, or starting the bot:
 
    ```powershell
-   python -B -m unittest -v test_bot test_admin_panel test_basket test_post_edit test_channel_posts
+   python -B -m unittest -v test_bot test_admin_panel test_basket test_post_edit test_channel_posts test_order_notes
    ```
 
 2. Stop your running bot yourself with Ctrl+C, then start it yourself:
