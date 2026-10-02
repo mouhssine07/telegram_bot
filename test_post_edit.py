@@ -114,7 +114,7 @@ class PostEditTests(BotTestCase):
         self.bot.save_products(self.products)
         self.text(999, '/edit p0001')
         self.assertEqual(self.edits(), [])
-        self.assertIn('طويل جدًا', self.sent_text())
+        self.assertIn('طويل بزاف', self.sent_text())
 
     def channel_api(self, method, data, timeout=15):
         if method == 'getChat':

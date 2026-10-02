@@ -82,7 +82,7 @@ def order_buttons(db, order):
                for status, label in STATUSES.items() if status != order["status"]]
     rows = [choices[index:index + 2] for index in range(0, len(choices), 2)]
     if order["note_audio_json"]:
-        rows.append([("🎤 سماع رسالة الطلب", f"audio:{key}")])
+        rows.append([("🎤 نسمع الفويس ديال الطلب", f"audio:{key}")])
     return rows
 
 
@@ -99,12 +99,12 @@ class Panel:
     def allowed(self, chat_id):
         if is_admin(self.db, self.owner, chat_id):
             return True
-        self.send(chat_id, "هذا القسم مخصص لفريق LuxeVista فقط.")
+        self.send(chat_id, "هاد القسم غير لفريق LuxeVista.")
         return False
 
     def home(self, chat_id):
         clear_editor(self.db, chat_id)
-        self.send(chat_id, "LuxeVista — لوحة الإدارة\nاختر القسم المطلوب. يتغير المخزون فقط عند تعديله يدويًا.", [
+        self.send(chat_id, "LuxeVista — لوحة الإدارة\nاختار القسم اللي بغيتي. المخزون كيتبدّل غير ملي كتبدّلو بيدك.", [
             [("📋 الطلبات", "adm:orders:0:all"), ("🆕 الطلبات الجديدة", "adm:orders:0:new")],
             [("⌚ المنتجات والمخزون", "adm:products:0"), ("➕ إضافة منتج", "adm:add")],
             [("📊 إجمالي المبيعات", "adm:sales:all")],
@@ -115,7 +115,7 @@ class Panel:
         rows = self.db.execute("SELECT * FROM orders" + where + " ORDER BY id DESC LIMIT 6 OFFSET ?",
                                (*params, page * 5)).fetchall()
         if not rows:
-            self.send(chat_id, "لا توجد طلبات في هذه الصفحة.", [[("لوحة الإدارة", "adm:home")]])
+            self.send(chat_id, "ما كاين حتى طلب فهاد الصفحة.", [[("لوحة الإدارة", "adm:home")]])
             return
         for order in rows[:5]:
             self.send(chat_id, self.order_message(order), order_buttons(self.db, order))
@@ -143,34 +143,34 @@ class Panel:
             else:
                 changed = False
         if not order:
-            self.send(chat_id, "تم حذف هذا الطلب. افتح /admin لعرض الطلبات الحالية.")
+            self.send(chat_id, "هاد الطلب تحيد. كتب /admin باش تشوف الطلبات اللي باقيين.")
             return
         current = self.db.execute("SELECT * FROM orders WHERE admin_key=?", (key,)).fetchone()
-        notice = "تم تحديث الحالة.\n\n" if changed else "هذا الزر قديم أو تم تطبيقه مسبقًا. الطلب الحالي:\n\n"
+        notice = "تبدلات الحالة.\n\n" if changed else "هاد الزر قديم ولا سبق تطبّق. ها الطلب دابا:\n\n"
         if changed and status == "confirmed":
             try:
                 self.send(current["chat_id"],
-                          f"✅ تم تأكيد طلبك #{current['id']}\n"
-                          "شكرًا لاختيارك LuxeVista. سنتواصل معك بخصوص التوصيل.\n\n"
+                          f"✅ تأكد الطلب ديالك #{current['id']}\n"
+                          "شكرا بزاف على الثقة فـ LuxeVista. غادي نتاصلو بيك على التوصيل.\n\n"
                           f"{item_summary(order_items(current))}\n"
-                          f"المجموع بدون التوصيل: "
+                          f"المجموع بلا التوصيل: "
                           f"{order_total(current)} DH\n\n"
-                          "لمتابعة طلبك: /orders")
-                notice = "تم تحديث الحالة. تم إرسال التأكيد بالعربية إلى العميل.\n\n"
+                          "باش تشوف الطلب ديالك: /orders")
+                notice = "تبدلات الحالة. صيفطنا التأكيد بالدارجة للزبون.\n\n"
             except RuntimeError:
-                notice = ("تم تحديث الحالة، لكن تعذّر إرسال التأكيد إلى العميل. "
-                          "تواصل مع العميل مباشرة؛ الطلب ما زال مؤكدًا.\n\n")
+                notice = ("تبدلات الحالة، ولكن ما قدرناش نصيفطو التأكيد للزبون. "
+                          "تاصل بالزبون مباشرة؛ الطلب باقي مؤكد.\n\n")
         self.send(chat_id, notice
                   + self.order_message(current), order_buttons(self.db, current))
 
     def confirm_order(self, chat_id, parts):
         if (len(parts) != 2 or not re.fullmatch(r"[1-9][0-9]{0,18}", parts[1])
                 or int(parts[1]) > 9223372036854775807):
-            self.send(chat_id, "لتأكيد طلب: أرسل /confirm ثم رقمه\nمثال: /confirm 2\nتحقق من أرقام الطلبات الحالية عبر /orders.")
+            self.send(chat_id, "لتأكيد طلب: أرسل /confirm ثم رقمه\nمثال: /confirm 2\nشوف النمرات ديال الطلبات دابا فـ /orders.")
             return
         order = self.db.execute("SELECT * FROM orders WHERE id=?", (int(parts[1]),)).fetchone()
         if not order:
-            self.send(chat_id, "الطلب غير موجود. تحقق من أرقام الطلبات الحالية عبر /orders.")
+            self.send(chat_id, "الطلب ما كاينش. شوف النمرات ديال الطلبات دابا فـ /orders.")
             return
         # Legacy rows may not have acquired their permanent button reference yet.
         order_buttons(self.db, order)
@@ -208,7 +208,7 @@ class Panel:
     def product(self, chat_id, sku):
         p = self.products.get(sku)
         if not p:
-            self.send(chat_id, "المنتج لم يعد موجودًا. افتح /admin لعرض الكتالوج الحالي.")
+            self.send(chat_id, "المنتج ما بقاش. كتب /admin باش تشوف الكتالوج دابا.")
             return
         stock = shop.stock(self.db, sku)
         categories = [row[0] for row in self.db.execute("SELECT topic FROM product_topics WHERE sku=? ORDER BY topic", (sku,))]
@@ -230,7 +230,7 @@ class Panel:
             self.db.execute("INSERT INTO admin_sessions VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET data=excluded.data",
                             (chat_id, json.dumps(data, ensure_ascii=False)))
         self.send(chat_id, f"تعديل {sku} — {self.products[sku]['name']}\nأرسل {FIELDS[field]} الجديد.\n"
-                  "للإلغاء: /cancel. أرسل - لحذف الوصف.")
+                  "باش تلغي: /cancel. صيفط - باش تحيد الوصف.")
 
     def editor_text(self, chat_id, raw):
         row = self.db.execute("SELECT data FROM admin_sessions WHERE chat_id=?", (chat_id,)).fetchone()
@@ -246,29 +246,29 @@ class Panel:
         if (current != data["product"] or (field == "stock" and shop.stock(self.db, sku) != data["stock"])
                 or (field == "categories" and categories != data["categories"])):
             clear_editor(self.db, chat_id)
-            self.send(chat_id, "تغير المنتج أو حُذف أثناء التعديل. افتحه مجددًا عبر /admin قبل إعادة التعديل.")
+            self.send(chat_id, "المنتج تبدّل ولا تحيد وانت كتعدّل فيه. عاود حلّو من /admin قبل ما تبدّلو.")
             return True
         value = raw.strip()
         if field in ("price_dh", "stock"):
             if not re.fullmatch(r"[0-9]{1,6}", value):
-                self.send(chat_id, "أدخل عددًا صحيحًا من ٠ إلى ٩٩٩٩٩٩، أو /cancel للإلغاء.")
+                self.send(chat_id, "كتب عدد صحيح من 0 حتى لـ 999999، ولا /cancel باش تلغي.")
                 return True
             value = int(value)
         elif field == "name":
             value = " ".join(value.split())
             if not 1 <= len(value) <= 100:
-                self.send(chat_id, "أدخل اسمًا من حرف واحد إلى ١٠٠ حرف، أو /cancel للإلغاء.")
+                self.send(chat_id, "كتب سمية من حرف حتى لـ 100 حرف، ولا /cancel باش تلغي.")
                 return True
         elif field == "description":
             value = "" if value == "-" else value
             if len(value) > 950:
-                self.send(chat_id, "الحد الأقصى للوصف ٩٥٠ حرفًا، أو /cancel للإلغاء.")
+                self.send(chat_id, "الوصف خاصو ما يفوتش 950 حرف، ولا كتب /cancel باش تلغي.")
                 return True
         elif field == "categories":
             parts = value.split()
             if parts != ["none"] and (not 1 <= len(parts) <= 5 or not all(
                     shop.TOPIC_PATTERN.fullmatch(topic) and topic not in ("all", "none") for topic in parts)):
-                self.send(chat_id, "أدخل حتى خمسة رموز للفئات، مثل women collections، أو none لحذفها.")
+                self.send(chat_id, "كتب حتى لـ 5 رموز ديال الفئات، بحال women collections، ولا none باش تحيدهم.")
                 return True
         if field == "stock":
             shop.set_stock(self.db, sku, value)
@@ -280,26 +280,26 @@ class Panel:
             self.products.clear()
             self.products.update(updated)
         clear_editor(self.db, chat_id)
-        self.send(chat_id, "تم الحفظ." + (f" أرسل /edit {sku} لتحديث منشورات القناة بهذه التفاصيل." if field in ("name", "price_dh", "description") else ""))
+        self.send(chat_id, "تحفظات المعلومات." + (f" أرسل /edit {sku} لتحديث منشورات القناة بهذه التفاصيل." if field in ("name", "price_dh", "description") else ""))
         self.product(chat_id, sku)
         return True
 
     def team(self, chat_id, parts):
         if not is_owner(self.owner, chat_id):
-            self.send(chat_id, "المسؤول الرئيسي فقط يمكنه إدارة صلاحيات الفريق.")
+            self.send(chat_id, "غير المسؤول الرئيسي اللي يقدر يبدّل صلاحيات الفريق.")
             return
         if len(parts) == 1:
             members = [str(row[0]) for row in self.db.execute("SELECT chat_id FROM admin_team ORDER BY chat_id")]
-            self.send(chat_id, "الفريق: " + (", ".join(members) or "لا يوجد أعضاء بعد") + "\n"
-                      "اطلب من العضو فتح البوت وإرسال /id.\n/team add CHAT_ID\n/team remove CHAT_ID\n"
-                      "يمكن لأعضاء الفريق رؤية جميع الطلبات وتغيير حالاتها وتعديل المنتجات والمخزون والنشر. أنت وحدك تستطيع إدارة الصلاحيات أو حذف الطلبات نهائيًا.")
+            self.send(chat_id, "الفريق: " + (", ".join(members) or "ما كاين حتى عضو دابا") + "\n"
+                      "قول للعضو يحلّ البوت ويصيفط /id.\n/team add CHAT_ID\n/team remove CHAT_ID\n"
+                      "الفريق يقدر يشوف كاع الطلبات ويبدّل الحالات والمنتجات والمخزون وينشر. غير نتا اللي تقدر تبدّل الصلاحيات ولا تمسح الطلبات نهائيًا.")
             return
         if len(parts) != 3 or parts[1] not in ("add", "remove") or not re.fullmatch(r"[1-9][0-9]{0,15}", parts[2]):
             self.send(chat_id, "أرسل /team add ثم معرّف المحادثة للإضافة، أو /team remove ثم المعرّف للإزالة. يجب أن يكون المعرّف رقمًا موجبًا لمحادثة خاصة.")
             return
         target = int(parts[2])
         if is_owner(self.owner, target):
-            self.send(chat_id, "المسؤول الرئيسي محدد في .env ولا يمكن تغييره هنا.")
+            self.send(chat_id, "المسؤول الرئيسي متحدد فـ .env وما يمكنش تبدّلو من هنا.")
             return
         with self.db:
             if parts[1] == "add":
@@ -311,8 +311,8 @@ class Panel:
 
     def add_product(self, chat_id):
         clear_editor(self.db, chat_id)
-        self.send(chat_id, "أرسل صورة المنتج أو ألبومًا هنا. ابدأ الوصف بالاسم وأضف سعرًا واحدًا بالدرهم دون كسور.\n"
-                  "مثال:\nساعة LuxeVista\n120 درهم\n\nيحدد البوت رمز المنتج. افتح المنتجات لتعديله أو تحديد المخزون. "
+        self.send(chat_id, "صيفط تصويرة المنتج ولا ألبوم هنا. بدا الوصف بالسمية وزيد ثمن واحد بالدرهم بلا فاصلة.\n"
+                  "مثال:\nساعة LuxeVista\n120 درهم\n\nالبوت كيعطي رمز للمنتج. حلّ المنتجات باش تبدّلو ولا تحدد المخزون. "
                   "Reply to the original photo with /preview, then /publish عندما تكون جاهزًا.")
 
     def command(self, chat_id, raw):
@@ -365,5 +365,5 @@ class Panel:
               and re.fullmatch(r"[0-9]{1,8}", parts[3]) and parts[4] in STATUSES):
             self.change_status(chat_id, parts[2], int(parts[3]), parts[4])
         else:
-            self.send(chat_id, "هذا الإجراء غير متاح. افتح /admin مجددًا.")
+            self.send(chat_id, "هاد العملية ما متاحاش. عاود حلّ /admin.")
         return True

@@ -8,14 +8,14 @@ from test_bot import BotTestCase
 
 
 class AdminPanelTests(BotTestCase):
-    def test_confirm_command_notifies_only_customer_once_in_arabic_only(self):
+    def test_confirm_command_notifies_only_customer_once_in_darija(self):
         self.insert_order(101, "Customer X")
         self.insert_order(202, "Customer Y")
         self.text(999, "/confirm 1")
         self.text(999, "/confirm 1")
         messages = [data for method, data in self.calls if method == "sendMessage" and data["chat_id"] == 101]
         self.assertEqual(len(messages), 1)
-        self.assertIn("تم تأكيد طلبك #1", messages[0]["text"])
+        self.assertIn("تأكد الطلب ديالك #1", messages[0]["text"])
         self.assertNotIn("Your order", messages[0]["text"])
         self.assertFalse(any(data.get("chat_id") == 202 for method, data in self.calls))
         self.assertEqual(self.db.execute("SELECT count(*) FROM order_status_history").fetchone()[0], 1)
@@ -49,7 +49,7 @@ class AdminPanelTests(BotTestCase):
         self.bot.api = failing_api
         self.text(999, "/confirm 1")
         self.assertEqual(self.db.execute("SELECT status FROM orders").fetchone()[0], "confirmed")
-        self.assertIn("تعذّر إرسال التأكيد", self.sent_text())
+        self.assertIn("ما قدرناش نصيفطو التأكيد", self.sent_text())
 
     def status_button(self, order_id, status):
         order = self.db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()

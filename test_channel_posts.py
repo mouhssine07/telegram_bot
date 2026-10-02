@@ -113,7 +113,7 @@ class ChannelLinkTests(BotTestCase):
     def test_missing_edit_permission_stops_before_import(self):
         self.can_edit = False
         self.edit()
-        self.assertIn('فعّل صلاحية تعديل الرسائل', self.sent_text())
+        self.assertIn('فعّل صلاحية تبديل الميساجات', self.sent_text())
         self.assertFalse(any(m == 'forwardMessage' for m, d in self.calls))
         self.assertIsNone(self.imported())
 
@@ -164,6 +164,18 @@ class ChannelLinkTests(BotTestCase):
         self.edit()
         self.assertEqual(self.products['p0002']['name'], 'Gold watch')
         self.assertEqual(self.edits()[0][1]['caption'].count('LUXEVISTA'), 1)
+        self.assertEqual(self.edits()[0][1]['caption'].count('طلب دابا'), 1)
+        self.assertNotIn('للقطعة', self.products['p0002']['description'])
+
+    def test_historical_arabic_caption_is_imported_without_duplicate_wrapper(self):
+        self.original['caption'] = (
+            'LUXEVISTA\n────────────────\n\nGold watch\n\nSteel bracelet\n\n'
+            '🟨  150 DH  ·  للوحدة\nالحد الأدنى: 10 قطع\n\n🛍 اطلب الآن')
+        self.edit()
+        caption = self.edits()[0][1]['caption']
+        self.assertNotIn('اطلب الآن', caption)
+        self.assertNotIn('الحد الأدنى', caption)
+        self.assertEqual(caption.count('طلب دابا'), 1)
 
     def test_album_does_not_depend_on_separate_message_permission(self):
         self.original['media_group_id'] = 'album1'

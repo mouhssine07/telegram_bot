@@ -38,19 +38,33 @@ class OrderNoteTests(BotTestCase):
     def test_visible_choices_guide_voice_and_text_without_losing_notes(self):
         self.begin_note()
         prompt = self.calls[-1][1]
-        buttons = [b for row in json.loads(prompt['reply_markup'])['inline_keyboard'] for b in row]
+        buttons = [b for row in json.loads(prompt['reply_markup'])['inline_keyboard'] for b in row
+                   if 'callback_data' in b]
         self.assertEqual([b['callback_data'] for b in buttons], ['note:voice', 'note:text', 'note:done'])
-        self.assertIn('تخطي', buttons[-1]['text'])
+        self.assertIn('ندوز بلا تفاصيل', buttons[-1]['text'])
         self.assertNotRegex(prompt['text'] + ''.join(b['text'] for b in buttons), '[A-Za-z]')
         old_id = self.next_id
         self.callback(101, 'note:voice', old_id)
-        self.assertIn('الميكروفون', self.calls[-1][1]['text'])
+        self.assertIn('الميكرو لتحت', self.calls[-1][1]['text'])
+        self.assertNotIn('note:voice', self.calls[-1][1]['reply_markup'])
+        self.assertNotIn('note:text', self.calls[-1][1]['reply_markup'])
+        removed = [d for m, d in self.calls if m == 'editMessageReplyMarkup']
+        self.assertEqual(removed[-1]['message_id'], old_id)
+        self.assertEqual(json.loads(removed[-1]['reply_markup']), {'inline_keyboard': []})
         current_id = self.next_id
         self.callback(101, 'note:done', old_id)
         self.assertEqual(self.bot.session(self.db, 101)[0], 'description')
         self.callback(101, 'note:text', current_id)
-        self.assertIn('مثال:', self.calls[-1][1]['text'])
+        self.assertEqual(self.bot.session(self.db, 101)[1]['note_mode'], 'voice')
+        self.callback(101, 'note:choose', current_id)
+        self.callback(101, 'note:text', self.next_id)
+        self.assertIn('مثلا:', self.calls[-1][1]['text'])
+        self.assertNotIn('note:text', self.calls[-1][1]['reply_markup'])
+        self.assertNotIn('note:voice', self.calls[-1][1]['reply_markup'])
         self.text(101, 'خمسة بالأسود وخمسة بالذهبي')
+        self.assertIn('وصلاتنا التفاصيل ديالك', self.calls[-1][1]['text'])
+        self.assertNotIn('note:text', self.calls[-1][1]['reply_markup'])
+        self.callback(101, 'note:choose', self.next_id)
         self.callback(101, 'note:voice', self.next_id)
         self.audio()
         order = self.submit()
@@ -59,6 +73,38 @@ class OrderNoteTests(BotTestCase):
         confirmed_id = self.next_id
         self.callback(101, 'note:voice', confirmed_id)
         self.assertIsNone(self.bot.session(self.db, 101))
+
+    def test_selected_input_survives_restart_and_invalid_input_without_loop(self):
+        self.begin_note()
+        self.callback(101, 'note:text', self.next_id)
+        prompt_id = self.next_id
+        self.text(101, 'x' * 1001)
+        self.assertEqual(self.bot.session(self.db, 101)[1]['note_message_id'], prompt_id)
+        self.assertNotIn('reply_markup', self.calls[-1][1])
+        self.db.close()
+        self.db = self.bot.connect()
+        self.assertEqual(self.bot.session(self.db, 101)[1]['note_mode'], 'text')
+        self.text(101, 'بغيتهم كحلين')
+        self.assertEqual(self.bot.session(self.db, 101)[1]['note_mode'], 'saved')
+        self.callback(101, 'note:done', prompt_id)
+        self.assertEqual(self.bot.session(self.db, 101)[0], 'description')
+        order = self.submit()
+        self.assertEqual(order['description'], 'بغيتهم كحلين')
+
+    def test_selected_voice_can_be_skipped_when_old_keyboard_cannot_be_removed(self):
+        self.begin_note()
+        old_id = self.next_id
+        def failing_api(method, data=None, timeout=15):
+            if method == 'editMessageReplyMarkup':
+                raise RuntimeError('Message unavailable')
+            return self.api(method, data, timeout)
+        self.bot.api = failing_api
+        self.callback(101, 'note:voice', old_id)
+        self.callback(101, 'note:done', old_id)
+        self.assertEqual(self.bot.session(self.db, 101)[0], 'description')
+        order = self.submit()
+        self.assertEqual(order['description'], '')
+        self.assertIsNone(order['note_audio_json'])
 
     def submit(self):
         self.callback(101, 'note:done', self.bot.session(self.db, 101)[1]['note_message_id'])

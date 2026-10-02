@@ -5,8 +5,8 @@ import re
 import time
 
 
-TOPICS = {"all": "كل المنتجات الجديدة", "women": "ساعات نسائية",
-          "men": "ساعات رجالية", "collections": "مجموعات جديدة"}
+TOPICS = {"all": "كاع المنتجات الجداد", "women": "سوايع ديال العيالات",
+          "men": "سوايع ديال الرجال", "collections": "تشكيلات جداد"}
 TOPIC_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,23}")
 
 
@@ -15,15 +15,15 @@ def error_message(exc):
     detail = str(exc)
     if isinstance(exc, TelegramError):
         if "message to edit not found" in detail.lower():
-            return "الرسالة المطلوب تعديلها غير موجودة."
+            return "الميساج اللي بغيتي تبدّل ما بقاش موجود."
         if exc.code == 429:
-            return "طلبات كثيرة في وقت قصير. انتظر قليلًا ثم أعد المحاولة."
+            return "كاينين طلبات بزاف فمدة قصيرة. تسنّى شوية وعاود جرّب."
         if exc.code == 403:
-            return "الوصول غير مسموح. تحقق من صلاحيات البوت."
-        return "تعذّر تنفيذ الطلب على تيليجرام. تحقق من الصلاحيات وأعد المحاولة."
+            return "البوت ما عندوش الصلاحية. شوف الصلاحيات ديالو."
+        return "ما قدرناش نكملو العملية فتيليجرام. شوف الصلاحيات وعاود جرّب."
     if re.search(r"[\u0600-\u06ff]", detail):
         return detail
-    return "تعذّر إكمال العملية. تحقق من الاتصال والإعدادات ثم أعد المحاولة."
+    return "ما قدرناش نكملو العملية. شوف الاتصال والإعدادات وعاود جرّب."
 
 
 class TelegramError(RuntimeError):
@@ -111,29 +111,29 @@ def preferences(db, products, chat_id, send):
         "SELECT topic FROM arrival_subscriptions WHERE chat_id=?", (chat_id,))}
     choices = topics(db)
     choices.update({topic: TOPICS.get(topic, topic) for topic in selected})
-    rows = [[(("🔕 إيقاف: " if topic in selected else "🔔 اشتراك: ") + label,
+    rows = [[(("🔕 نوقف: " if topic in selected else "🔔 نشترك: ") + label,
               f"arrival:{'off' if topic in selected else 'on'}:{topic}")]
             for topic, label in choices.items()]
-    rows += [[("إلغاء تنبيه: " + products.get(row[0], {}).get("name", row[0]), f"unrestock:{row[0]}")]
+    rows += [[("نوقف التنبيه ديال: " + products.get(row[0], {}).get("name", row[0]), f"unrestock:{row[0]}")]
              for row in db.execute("SELECT sku FROM restock_requests WHERE chat_id=?", (chat_id,))]
-    rows.append([("🔕 إيقاف جميع التنبيهات", "notifications:off")])
+    rows.append([("🔕 نوقف كاع التنبيهات", "notifications:off")])
     # Keep unusually large catalogs within Telegram's keyboard/message limits.
     for offset in range(0, len(rows), 40):
-        send(chat_id, "🔔 تنبيهات LuxeVista\nاختر ما تريد الاشتراك فيه. لن نرسل تنبيهات دون طلبك.\n"
-             "تنبيه التوفر يُرسل مرة واحدة لكل طلب. لإيقاف الجميع: /notifications off", rows[offset:offset + 40])
+        send(chat_id, "🔔 تنبيهات LuxeVista\nاختار شنو بغيتي نخبروك عليه. ما غادي نصيفطو ليك والو بلا ما تختار.\n"
+             "غادي نخبروك مرة وحدة ملي يرجع المنتج. باش توقف كلشي: /notifications off", rows[offset:offset + 40])
 
 
 def notification_callback(db, products, chat_id, command, send):
     if command == "notifications:off":
         stop_notifications(db, chat_id)
-        send(chat_id, "تم إيقاف جميع التنبيهات. يمكنك الاشتراك مجددًا عبر /notifications")
+        send(chat_id, "وقفنا كاع التنبيهات. إلا بغيتي ترجع تشترك، كتب /notifications")
     elif command.startswith("arrival:"):
         parts = command.split(":")
         if len(parts) != 3 or parts[1] not in ("on", "off"):
             return True
         action, topic = parts[1:]
         if not TOPIC_PATTERN.fullmatch(topic) or (action == "on" and topic not in topics(db)):
-            send(chat_id, "هذه الفئة غير متاحة. افتح /notifications")
+            send(chat_id, "هاد الفئة ما بقاتش. كتب /notifications باش تختار من جديد.")
             return True
         with db:
             if action == "on":
@@ -148,22 +148,22 @@ def notification_callback(db, products, chat_id, command, send):
     elif command.startswith("restock:"):
         sku = command[len("restock:"):]
         if sku not in products:
-            send(chat_id, "هذا المنتج لم يعد متاحًا.")
+            send(chat_id, "هاد المنتج ما بقاش متوفر.")
         elif stock(db, sku) != 0:
-            send(chat_id, "هذا المنتج متاح الآن. افتح /start لطلبه.")
+            send(chat_id, "هاد المنتج موجود دابا. كتب /start باش تطلبو.")
         else:
             with db:
                 db.execute("INSERT OR IGNORE INTO notification_skus VALUES (?)", (sku,))
                 db.execute("INSERT OR IGNORE INTO restock_requests(chat_id, sku) VALUES (?, ?)", (chat_id, sku))
-            send(chat_id, "✅ سنخبرك مرة واحدة عند توفر هذا المنتج. لإدارة التنبيهات: /notifications",
-                 [[("إلغاء هذا التنبيه", f"unrestock:{sku}")]])
+            send(chat_id, "✅ غادي نخبروك مرة وحدة ملي يرجع هاد المنتج. باش تبدّل التنبيهات: /notifications",
+                 [[("نوقف هاد التنبيه", f"unrestock:{sku}")]])
     elif command.startswith("unrestock:"):
         sku = command[len("unrestock:"):]
         with db:
             db.execute("DELETE FROM restock_requests WHERE chat_id=? AND sku=?", (chat_id, sku))
             db.execute("UPDATE notification_jobs SET status='cancelled' WHERE chat_id=? AND sku=? AND kind='restock' AND status='pending'",
                        (chat_id, sku))
-        send(chat_id, "تم إلغاء تنبيه التوفر لهذا المنتج.")
+        send(chat_id, "صافي، وقفنا التنبيه ديال هاد المنتج.")
     else:
         return False
     return True
@@ -192,7 +192,7 @@ def admin_command(db, products, chat_id, command, send):
     if action == "/stock":
         if len(parts) == 2:
             quantity = stock(db, sku)
-            send(chat_id, f"{sku}: " + (f"{quantity} قطعة متاحة." if quantity is not None else "المخزون غير محدد. أرسل /stock ثم رمز المنتج والكمية."))
+            send(chat_id, f"{sku}: " + (f"{quantity} قطعة متاحة." if quantity is not None else "المخزون ما متحددش. صيفط /stock ومن بعد رمز المنتج والكمية."))
         elif len(parts) == 3 and re.fullmatch(r"[0-9]{1,6}", parts[2]):
             set_stock(db, sku, int(parts[2]))
             send(chat_id, f"مخزون {sku}: {int(parts[2])}. أُضيفت تنبيهات التوفر المستحقة تلقائيًا إلى قائمة الإرسال.")
@@ -201,7 +201,7 @@ def admin_command(db, products, chat_id, command, send):
     elif action == "/category":
         if len(parts) == 2:
             labels = [row[0] for row in db.execute("SELECT topic FROM product_topics WHERE sku=? ORDER BY topic", (sku,))]
-            send(chat_id, f"{sku}: " + (", ".join(labels) or "لا توجد فئات. أرسل /category ثم رمز المنتج ثم رموز الفئات."))
+            send(chat_id, f"{sku}: " + (", ".join(labels) or "ما كايناش فئات. صيفط /category ومن بعد رمز المنتج ورموز الفئات."))
         elif (len(parts) <= 7 and all(TOPIC_PATTERN.fullmatch(topic) and topic not in ("all", "none") for topic in parts[2:])) or parts[2:] == ["none"]:
             with db:
                 db.execute("INSERT OR IGNORE INTO notification_skus VALUES (?)", (sku,))
@@ -217,7 +217,7 @@ def admin_command(db, products, chat_id, command, send):
             return
         with db:
             queued = queue_arrival(db, sku)
-        send(chat_id, "أُضيفت تنبيهات المنتجات الجديدة للمشتركين الحاليين إلى قائمة الإرسال." if queued else "سبق الإعلان عن المنتج؛ لم تتم إضافة تنبيهات مكررة.")
+        send(chat_id, "وجدنا تنبيهات الجديد باش يتصيفطو للمشتركين اللي كاينين دابا." if queued else "سبق علنّا على هاد المنتج. ما غاديش نعاودو نفس التنبيهات.")
 
 
 def process_notifications(db, products, username, api, now=None):
@@ -240,16 +240,16 @@ def process_notifications(db, products, username, api, now=None):
         with db:
             db.execute("UPDATE notification_jobs SET next_attempt=? WHERE id=?", (now + 60, job["id"]))
         return
-    title = "🔔 متوفر من جديد" if job["kind"] == "restock" else "✨ جديد LuxeVista"
-    markup = {"inline_keyboard": [[{"text": "🛒 اطلب الآن",
+    title = "🔔 رجع متوفر" if job["kind"] == "restock" else "✨ جديد LuxeVista"
+    markup = {"inline_keyboard": [[{"text": "🛒 طلب دابا",
                "url": f"https://t.me/{username}?start=p_{job['sku']}_{job['kind']}"}],
-               [{"text": "🔕 إيقاف جميع التنبيهات", "callback_data": "notifications:off"}]]}
+               [{"text": "🔕 نوقف كاع التنبيهات", "callback_data": "notifications:off"}]]}
     with db:
         # At most one notification per second, including across restarts.
         db.execute("UPDATE notification_clock SET next_send=? WHERE id=1", (now + 1,))
     try:
         api("sendMessage", {"chat_id": job["chat_id"],
-            "text": f"{title}\n{product['name']}\n{product['price_dh']} DH\n\nلإدارة التنبيهات: /notifications",
+            "text": f"{title}\n{product['name']}\n{product['price_dh']} DH\n\nباش تبدّل التنبيهات: /notifications",
             "reply_markup": json.dumps(markup, ensure_ascii=False)})
     except RuntimeError as exc:
         if getattr(exc, "code", 0) == 403:

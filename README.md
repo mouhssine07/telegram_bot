@@ -1,8 +1,10 @@
 # LuxeVista Telegram shop bot
 
-L’interface du bot et les modèles de publication sont en arabe uniquement. À l’étape facultative des détails, le client voit trois choix : **🎤 رسالة صوتية**, **✍️ كتابة التفاصيل**, **⏭ تخطي، بدون تفاصيل**. Le bouton vocal explique comment enregistrer le message avec le microphone de Telegram ; il ne lance pas l’enregistrement lui-même. Texte et audio peuvent être envoyés directement et combinés avant confirmation.
+Le parcours client et les modèles de publication sont en darija marocaine, écrite en caractères arabes. À l’étape facultative des détails, le client voit trois choix : **🎤 نصيفط فويس**, **✍️ نكتب التفاصيل**, **⏭ ندوز بلا تفاصيل**. Après un choix, les anciens boutons sont retirés et seule la consigne correspondante s’affiche, avec une possibilité de changer de méthode ou de passer. Après réception, un récapitulatif propose **✅ نكملو** ; le menu de choix ne revient que sur demande du client. Le bouton vocal explique comment utiliser le microphone de Telegram ; maintenir le bouton du bot ne peut pas enregistrer un vocal. Texte et audio peuvent être envoyés directement et combinés avant confirmation.
 
 Après une mise à jour, redémarrez le bot avec `python bot.py`. Pour appliquer les nouveaux libellés aux publications existantes, utilisez `/edit p0001` (en remplaçant le code par celui du produit), ou `/edit` suivi du lien du message publié. Les noms de marque et le contenu des produits saisi par le vendeur restent tels qu’enregistrés.
+
+Le lien **💬 تقدر حتى تتاصل بينا فالواتساب** ouvre le numéro `212781209365` avec un brouillon en darija : produit et prix sur les fiches et publications ; quantité, coordonnées et détails déjà saisis dans le parcours privé ; numéro de commande après validation. Le client choisit de l’envoyer dans WhatsApp. Aucun vocal n’est transféré automatiquement et aucune coordonnée client n’est ajoutée aux publications du canal.
 
 This bot supports a small product catalog, a private order form, SQLite order storage, an admin alert, `/orders`, tracked product links, and channel posts with a styled **Order now** caption link. It uses Python 3.10+ and the standard library. No hosting is needed to try it on your own computer; keep the process running to receive orders.
 
