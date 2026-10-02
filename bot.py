@@ -126,7 +126,7 @@ def whatsapp_button(product=None, data=None, order=None):
     if data.get("description"):
         lines.append("التفاصيل: " + data["description"])
     if data.get("note_audio"):
-        lines.append("صيفطت فويس فتيليجرام. نقدر نعاود نصيفطو هنا إلا احتاجيتوه.")
+        lines.append("صيفطت ڤوكال فتيليجرام. نقدر نعاود نصيفطو هنا إلا احتاجيتوه.")
     return {"text": WHATSAPP_LABEL,
             "url": WHATSAPP_URL + "?" + urllib.parse.urlencode({"text": "\n".join(lines)})}
 
@@ -438,10 +438,9 @@ def show_product(chat_id: int, product: dict, db: sqlite3.Connection, source: st
         [("🛍 طلب دابا", f"order:{sku}:{source}")]]
     buttons.append([whatsapp_button(product)])
     send_order(db, chat_id,
-         f"{product['name']}\n{product.get('description', '')}\n\n"
          f"الثمن: {product['price_dh']} درهم للقطعة\n"
-         + ("سالَا دابا. كليكي باش نخبروك ملي يرجع." if unavailable else "ثمن التوصيل غادي نتافقو عليه ملي نأكدو الطلب.")
-         + "\nباش يوصلك الجديد: /notifications", buttons)
+         "ثمن التوصيل غادي نتافقو عليه ملي نأكدو الطلب."
+         + ("\nسالَا دابا. كليكي باش نخبروك ملي يرجع." if unavailable else ""), buttons)
 
 
 def start(chat_id: int, payload: str, products: dict, db: sqlite3.Connection) -> None:
@@ -995,7 +994,7 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
         elif raw and len(raw) <= 1000:
             data["description"] = raw
         else:
-            send_order(db, chat_id, "صيفط لينا شنو بغيتي فـ 1000 حرف ولا أقل، ولا صيفط فويس.")
+            send_order(db, chat_id, "صيفط لينا شنو بغيتي فـ 1000 حرف ولا أقل، ولا صيفط ڤوكال.")
             return
         ask_order_note(chat_id, data, db, product=products.get(data.get("sku")))
         return
@@ -1084,7 +1083,7 @@ def next_detail(chat_id: int, data: dict, products: dict, db: sqlite3.Connection
 
 def note_summary(data):
     return ("التفاصيل ديال الطلب: " + (data.get("description") or "—")
-            + ("\n🎤 الفويس ديالك تسجّل" if data.get("note_audio") else ""))
+            + ("\n🎤 الڤوكال ديالك تسجّل" if data.get("note_audio") else ""))
 
 
 def ask_order_note(chat_id, data, db, mode=None, product=None):
@@ -1093,8 +1092,8 @@ def ask_order_note(chat_id, data, db, mode=None, product=None):
     done = ("✅ نكملو" if has_note else "⏭ ندوز بلا تفاصيل", "note:done")
     rows = [[done], [("↩️ نبدّل الطريقة", "note:choose")]]
     if mode == "voice":
-        prompt = ("🎤 صيفط لينا فويس فيه شنو بغيتي\n\n"
-                  "شدّ على الميكرو لتحت حدا بلاصة الكتابة، هضر على اللوان والتفاصيل وصيفط الفويس.\n"
+        prompt = ("🎤 صيفط لينا ڤوكال فيه شنو بغيتي\n\n"
+                  "شدّ على الميكرو لتحت حدا بلاصة الكتابة، هضر على اللوان والتفاصيل وصيفط الڤوكال.\n"
                   "إلا بانت ليك الكاميرا بلاصة الميكرو، كليكي عليها مرة باش تبدّل للصوت.")
     elif mode == "text":
         prompt = ("✍️ كتب لينا هنا اللوان ولا التفاصيل اللي بغيتي\n\n"
@@ -1104,16 +1103,16 @@ def ask_order_note(chat_id, data, db, mode=None, product=None):
         prompt = ("✅ وصلاتنا التفاصيل ديالك\n\n" + note_summary(data)
                   + "\n\nكليكي على «نكملو» باش تشوف الطلب ديالك قبل ما تأكدو.")
         rows = [[done], [("✏️ نبدّل ولا نزيد تفاصيل", "note:choose")],
-                [("🗑 نمسح التفاصيل والفويس", "note:clear")]]
+                [("🗑 نمسح التفاصيل والڤوكال", "note:clear")]]
     else:
         prompt = ("🎨 بغيتي شي لون ولا عندك شي تفاصيل؟\n\n"
-                  "🎤 تقدر تصيفط فويس بلا ما تكتب\n"
+                  "🎤 تقدر تصيفط ڤوكال بلا ما تكتب\n"
                   "✍️ ولا تكتب لينا شنو بغيتي\n\n"
                   "ما عندك ما تزيد؟ كليكي على «ندوز بلا تفاصيل» 👇")
         if has_note:
             prompt = ("✏️ كيفاش بغيتي تبدّل ولا تزيد التفاصيل؟\n\n"
-                      "تقدر تجمع الكتابة والفويس. الكتابة الجديدة كتبدّل القديمة، والفويس الجديد كيبدّل القديم.")
-        rows = [[("🎤 نصيفط فويس", "note:voice")],
+                      "تقدر تجمع الكتابة والڤوكال. الكتابة الجديدة كتبدّل القديمة، والڤوكال الجديد كيبدّل القديم.")
+        rows = [[("🎤 نصيفط ڤوكال", "note:voice")],
                 [("✍️ نكتب التفاصيل", "note:text")], [done]]
     rows.append([whatsapp_button(product, data)])
     clear_note_buttons(chat_id, data)
@@ -1212,7 +1211,7 @@ def order_message(order: sqlite3.Row) -> str:
             f"الاسم: {order['customer_name']}\nالتيليفون: {order['phone']}\n"
             f"المدينة: {order['city']}\nالعنوان: {order['address']}\n"
             f"التفاصيل ديال الطلب: {order['description'] or '—'}\n"
-            + ("🎤 الفويس ديالك تسجّل\n" if order["note_audio_json"] else "")
+            + ("🎤 الڤوكال ديالك تسجّل\n" if order["note_audio_json"] else "")
             + f"المصدر: { {'channel': 'القناة', 'catalog': 'الكتالوج', 'direct': 'مباشر', 'arrival': 'تنبيه الجديد', 'restock': 'تنبيه التوفر'}.get(order['source'], order['source'])}\nالتاريخ (التوقيت العالمي): {order['created_at']}")
 
 

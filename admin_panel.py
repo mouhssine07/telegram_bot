@@ -82,7 +82,7 @@ def order_buttons(db, order):
                for status, label in STATUSES.items() if status != order["status"]]
     rows = [choices[index:index + 2] for index in range(0, len(choices), 2)]
     if order["note_audio_json"]:
-        rows.append([("🎤 نسمع الفويس ديال الطلب", f"audio:{key}")])
+        rows.append([("🎤 نسمع الڤوكال ديال الطلب", f"audio:{key}")])
     return rows
 
 
