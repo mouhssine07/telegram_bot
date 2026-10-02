@@ -1,5 +1,9 @@
 # LuxeVista Telegram shop bot
 
+L’interface du bot et les modèles de publication sont en arabe uniquement. À l’étape facultative des détails, le client voit trois choix : **🎤 رسالة صوتية**, **✍️ كتابة التفاصيل**, **⏭ تخطي، بدون تفاصيل**. Le bouton vocal explique comment enregistrer le message avec le microphone de Telegram ; il ne lance pas l’enregistrement lui-même. Texte et audio peuvent être envoyés directement et combinés avant confirmation.
+
+Après une mise à jour, redémarrez le bot avec `python bot.py`. Pour appliquer les nouveaux libellés aux publications existantes, utilisez `/edit p0001` (en remplaçant le code par celui du produit), ou `/edit` suivi du lien du message publié. Les noms de marque et le contenu des produits saisi par le vendeur restent tels qu’enregistrés.
+
 This bot supports a small product catalog, a private order form, SQLite order storage, an admin alert, `/orders`, tracked product links, and channel posts with a styled **Order now** caption link. It uses Python 3.10+ and the standard library. No hosting is needed to try it on your own computer; keep the process running to receive orders.
 
 ## Set up (Windows PowerShell)

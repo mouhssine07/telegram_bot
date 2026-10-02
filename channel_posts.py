@@ -2,7 +2,7 @@
 import json
 import re
 
-from shop_updates import TelegramError
+from shop_updates import TelegramError, error_message
 
 
 def init_schema(db):
@@ -70,7 +70,7 @@ def known_product(db, channel_id, target, mid):
     if imported:
         candidates.add(imported[0])
     if len(candidates) > 1:
-        raise ValueError("This post has conflicting product records. Resolve its SKU mapping before editing.")
+        raise ValueError("هذا المنشور مرتبط بسجلات منتجات متعارضة. صحح ارتباط رمز المنتج قبل التعديل.")
     return next(iter(candidates), None), cta, album_id
 
 
@@ -78,16 +78,16 @@ def edit_link(db, products, chat_id, target, username, url, *, api, save_product
               next_sku, parse_caption, caption, keyboard):
     link = re.fullmatch(r"https://t\.me/(?:(c)/([0-9]+)|([A-Za-z0-9_]+))/([1-9][0-9]*)(?:\?single)?", url)
     if not link or not target:
-        raise ValueError("Use /edit https://t.me/yourchannel/123 and configure CHANNEL_ID first.")
+        raise ValueError("اضبط CHANNEL_ID أولًا، ثم استخدم /edit متبوعًا برابط المنشور مثل https://t.me/yourchannel/123.")
     channel = api("getChat", {"chat_id": target})
     matches = (str(channel["id"]) == "-100" + link[2] if link[1]
                else str(channel.get("username", "")).lower() == link[3].lower())
     if not matches or channel.get("type") != "channel":
-        raise ValueError("The link must belong to your configured Telegram channel.")
+        raise ValueError("يجب أن يكون الرابط من قناة تيليجرام المحددة.")
     me = api("getMe")
     member = api("getChatMember", {"chat_id": channel["id"], "user_id": me["id"]})
     if member.get("status") != "creator" and not (member.get("status") == "administrator" and member.get("can_edit_messages")):
-        raise ValueError("Enable Edit Messages in the bot's channel administrator permissions, then retry.")
+        raise ValueError("فعّل صلاحية تعديل الرسائل للبوت في إدارة القناة، ثم أعد المحاولة.")
     channel_id, mid = str(channel["id"]), int(link[4])
     row = db.execute("SELECT * FROM channel_products WHERE channel_id=? AND message_id=?", (channel_id, mid)).fetchone()
     if not row:
@@ -96,31 +96,32 @@ def edit_link(db, products, chat_id, target, username, url, *, api, save_product
             original = api("forwardMessage", {"chat_id": chat_id, "from_chat_id": channel_id,
                            "message_id": mid, "disable_notification": True})
         except RuntimeError as exc:
-            raise RuntimeError(f"Could not read this post. It may be deleted, protected from forwarding, or inaccessible: {exc}") from exc
+            raise RuntimeError(f"تعذّرت قراءة المنشور. قد يكون محذوفًا أو محميًا من إعادة التوجيه أو غير متاح: {error_message(exc)}") from exc
         kind = "photo" if original.get("photo") else "video" if original.get("video") else "text" if original.get("text") else None
         if not kind:
-            raise ValueError("This post is unsupported. Use a photo, video, or text product post.")
+            raise ValueError("نوع المنشور غير مدعوم. استخدم صورة أو فيديو أو منشورًا نصيًا للمنتج.")
         raw = original.get("caption") if kind != "text" else original.get("text")
         if not raw:
-            raise ValueError("This photo has no product caption. Copy the link of the album photo containing the name and price.")
+            raise ValueError("هذه الصورة لا تحتوي وصف المنتج. انسخ رابط صورة الألبوم التي تحمل الاسم والسعر.")
         sku, cta, known_album = known_product(db, channel_id, target, mid)
         album_id = original.get("media_group_id") or known_album
         if not sku and album_id:
             sibling = db.execute("SELECT sku FROM channel_products WHERE channel_id=? AND album_id=?",
                                  (channel_id, str(album_id))).fetchone()
             if sibling:
-                raise ValueError("This album is already imported. Use /edit " + sibling[0] + " to update it.")
+                raise ValueError("سبق استيراد هذا الألبوم. استخدم /edit " + sibling[0] + " لتحديثه.")
         if sku:
             if sku not in products:
-                raise ValueError(f"The linked product {sku} was removed from the catalog. Restore it before editing.")
+                raise ValueError(f"حُذف المنتج المرتبط {sku} من الكتالوج. أعده قبل التعديل.")
             product = products[sku]
         else:
             # Strip only the known LuxeVista wrapper, so already-formatted posts can be adopted.
             lines = raw.splitlines()
             if lines and lines[0].strip() == "LUXEVISTA":
                 lines = [line for line in lines[1:] if line.strip() and not set(line.strip()) <= {'─'}
-                         and line.strip() not in {"🛍 اطلب الآن | Order now", "الحد الأدنى: 10 قطع | Minimum: 10 pieces"}]
-                lines = [line.replace("🟨  ", "").replace("  ·  للوحدة | per item", "") for line in lines]
+                         and line.strip() not in {"🛍 اطلب الآن | Order now", "الحد الأدنى: 10 قطع | Minimum: 10 pieces",
+                                                  "🛍 اطلب الآن", "الحد الأدنى: 10 قطع"}]
+                lines = [line.replace("🟨  ", "").replace("  ·  للوحدة | per item", "").replace("  ·  للوحدة", "") for line in lines]
             name, description, price = parse_caption("\n".join(lines))
             sku = next_sku(products, db)
             product = {"sku": sku, "name": name, "description": description, "price_dh": price}
@@ -143,9 +144,9 @@ def edit_link(db, products, chat_id, target, username, url, *, api, save_product
         with db:
             db.execute("UPDATE channel_products SET catalog_ready=1 WHERE channel_id=? AND message_id=?", (channel_id, mid))
     if sku not in products:
-        raise ValueError(f"Product {sku} was removed from the catalog. Restore it before editing.")
+        raise ValueError(f"حُذف المنتج {sku} من الكتالوج. أعده قبل التعديل.")
     try:
         update(db, row, products[sku], username, api, caption, keyboard)
     except RuntimeError as exc:
-        raise RuntimeError(f"Product {sku} is saved, but updating its channel post/button failed: {exc}. Retry the same /edit link.") from exc
+        raise RuntimeError(f"تم حفظ المنتج {sku}، لكن تعذّر تحديث منشور القناة أو زره: {error_message(exc)}. أعد إرسال نفس رابط /edit.") from exc
     return sku

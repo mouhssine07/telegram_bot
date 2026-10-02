@@ -35,6 +35,31 @@ class OrderNoteTests(BotTestCase):
                               'message_id': 40, kind: {'file_id': file_id}},
                              self.products, self.db, 'TestBot')
 
+    def test_visible_choices_guide_voice_and_text_without_losing_notes(self):
+        self.begin_note()
+        prompt = self.calls[-1][1]
+        buttons = [b for row in json.loads(prompt['reply_markup'])['inline_keyboard'] for b in row]
+        self.assertEqual([b['callback_data'] for b in buttons], ['note:voice', 'note:text', 'note:done'])
+        self.assertIn('تخطي', buttons[-1]['text'])
+        self.assertNotRegex(prompt['text'] + ''.join(b['text'] for b in buttons), '[A-Za-z]')
+        old_id = self.next_id
+        self.callback(101, 'note:voice', old_id)
+        self.assertIn('الميكروفون', self.calls[-1][1]['text'])
+        current_id = self.next_id
+        self.callback(101, 'note:done', old_id)
+        self.assertEqual(self.bot.session(self.db, 101)[0], 'description')
+        self.callback(101, 'note:text', current_id)
+        self.assertIn('مثال:', self.calls[-1][1]['text'])
+        self.text(101, 'خمسة بالأسود وخمسة بالذهبي')
+        self.callback(101, 'note:voice', self.next_id)
+        self.audio()
+        order = self.submit()
+        self.assertEqual(order['description'], 'خمسة بالأسود وخمسة بالذهبي')
+        self.assertEqual(json.loads(order['note_audio_json'])['file_id'], 'saved-audio')
+        confirmed_id = self.next_id
+        self.callback(101, 'note:voice', confirmed_id)
+        self.assertIsNone(self.bot.session(self.db, 101))
+
     def submit(self):
         self.callback(101, 'note:done', self.bot.session(self.db, 101)[1]['note_message_id'])
         self.assertEqual(self.bot.session(self.db, 101)[0], 'confirm')
@@ -72,7 +97,7 @@ class OrderNoteTests(BotTestCase):
         self.assertFalse(any(m == 'sendAudio' for m, d in self.calls))
         self.callback(999, 'audio:' + order['admin_key'], 1)
         playback = next(d for m, d in self.calls if m == 'sendAudio')
-        self.assertIn('Order #1', playback['caption'])
+        self.assertIn('طلب #1', playback['caption'])
         self.text(999, '/delete 1')
         self.calls.clear()
         self.callback(999, 'audio:' + order['admin_key'], 1)

@@ -91,11 +91,11 @@ class PostEditTests(BotTestCase):
             return self.api(method, data, timeout)
         self.bot.api = edit_api
         self.text(999, '/edit p0001')
-        self.assertIn('2 already current', self.sent_text())
-        self.assertIn('1 update(s) failed', self.sent_text())
+        self.assertIn('2 رسالة محدثة مسبقًا', self.sent_text())
+        self.assertIn('فشل تحديث 1 رسالة', self.sent_text())
         fail_button = False
         self.text(999, '/edit p0001')
-        self.assertIn('1 channel message(s) updated; 2 already current', self.calls[-1][1]['text'])
+        self.assertIn('تم تحديث 1 رسالة في القناة؛ و2 رسالة محدثة مسبقًا', self.calls[-1][1]['text'])
         self.assert_no_republication()
 
     def test_legacy_album_without_button_and_bad_records_do_not_create_posts(self):
@@ -106,7 +106,7 @@ class PostEditTests(BotTestCase):
         self.text(999, '/edit p0001')
         self.assertEqual([d['message_id'] for m, d in self.edits()], [70])
         self.assertNotIn('no recorded button', self.sent_text())
-        self.assertIn('invalid saved message IDs', self.sent_text())
+        self.assertIn('معرّفات رسائل غير صالحة', self.sent_text())
         self.assert_no_republication()
 
     def test_long_caption_fails_before_any_edit(self):
@@ -114,7 +114,7 @@ class PostEditTests(BotTestCase):
         self.bot.save_products(self.products)
         self.text(999, '/edit p0001')
         self.assertEqual(self.edits(), [])
-        self.assertIn('too long', self.sent_text())
+        self.assertIn('طويل جدًا', self.sent_text())
 
     def channel_api(self, method, data, timeout=15):
         if method == 'getChat':
@@ -159,7 +159,7 @@ class PostEditTests(BotTestCase):
         self.bot.api = failed_api
         self.text(999, '/edit p0001 https://t.me/channel/872')
         self.assertEqual(self.db.execute('SELECT count(*) FROM post_caption_overrides').fetchone()[0], 0)
-        self.assertIn('saved message is unavailable', self.sent_text())
+        self.assertIn('الرسالة المحفوظة غير متاحة', self.sent_text())
         self.assert_no_republication()
 
     def test_already_current_repair_still_saves_reference(self):
@@ -170,4 +170,4 @@ class PostEditTests(BotTestCase):
         self.bot.api = unchanged_api
         self.text(999, '/edit p0001 https://t.me/channel/872')
         self.assertEqual(self.db.execute('SELECT caption_message_id FROM post_caption_overrides').fetchone()[0], 872)
-        self.assertIn('1 already current', self.sent_text())
+        self.assertIn('1 رسالة محدثة مسبقًا', self.sent_text())

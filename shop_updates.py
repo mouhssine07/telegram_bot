@@ -10,6 +10,22 @@ TOPICS = {"all": "كل المنتجات الجديدة", "women": "ساعات ن
 TOPIC_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,23}")
 
 
+def error_message(exc):
+    """Keep raw service diagnostics out of Arabic chat messages."""
+    detail = str(exc)
+    if isinstance(exc, TelegramError):
+        if "message to edit not found" in detail.lower():
+            return "الرسالة المطلوب تعديلها غير موجودة."
+        if exc.code == 429:
+            return "طلبات كثيرة في وقت قصير. انتظر قليلًا ثم أعد المحاولة."
+        if exc.code == 403:
+            return "الوصول غير مسموح. تحقق من صلاحيات البوت."
+        return "تعذّر تنفيذ الطلب على تيليجرام. تحقق من الصلاحيات وأعد المحاولة."
+    if re.search(r"[\u0600-\u06ff]", detail):
+        return detail
+    return "تعذّر إكمال العملية. تحقق من الاتصال والإعدادات ثم أعد المحاولة."
+
+
 class TelegramError(RuntimeError):
     def __init__(self, description, code=0, retry_after=0):
         super().__init__(f"Telegram API: {description}")
@@ -170,38 +186,38 @@ def admin_command(db, products, chat_id, command, send):
     """Call only after verifying the configured admin and private chat."""
     parts = command.split()
     if len(parts) < 2 or parts[1] not in products:
-        send(chat_id, "Use /stock SKU [quantity], /category SKU women collections, or /announce SKU.\nChoose an existing SKU.")
+        send(chat_id, "للمخزون: /stock ثم رمز المنتج والكمية، للفئات: /category ثم رمز المنتج ورموز الفئات، للإعلان: /announce ثم رمز المنتج.\nاختر رمز منتج موجود.")
         return
     action, sku = parts[:2]
     if action == "/stock":
         if len(parts) == 2:
             quantity = stock(db, sku)
-            send(chat_id, f"{sku}: " + (f"{quantity} available." if quantity is not None else "Stock is not tracked yet. Set it with /stock SKU quantity."))
+            send(chat_id, f"{sku}: " + (f"{quantity} قطعة متاحة." if quantity is not None else "المخزون غير محدد. أرسل /stock ثم رمز المنتج والكمية."))
         elif len(parts) == 3 and re.fullmatch(r"[0-9]{1,6}", parts[2]):
             set_stock(db, sku, int(parts[2]))
-            send(chat_id, f"Stock for {sku}: {int(parts[2])}. Eligible restock alerts are queued automatically.")
+            send(chat_id, f"مخزون {sku}: {int(parts[2])}. أُضيفت تنبيهات التوفر المستحقة تلقائيًا إلى قائمة الإرسال.")
         else:
-            send(chat_id, "Usage: /stock SKU quantity (whole number from 0 to 999999). This sets the total available quantity.")
+            send(chat_id, "أرسل /stock ثم رمز المنتج ثم الكمية (عدد صحيح من ٠ إلى ٩٩٩٩٩٩) لتحديد إجمالي المخزون.")
     elif action == "/category":
         if len(parts) == 2:
             labels = [row[0] for row in db.execute("SELECT topic FROM product_topics WHERE sku=? ORDER BY topic", (sku,))]
-            send(chat_id, f"{sku}: " + (", ".join(labels) or "No categories. Use /category SKU women collections"))
+            send(chat_id, f"{sku}: " + (", ".join(labels) or "لا توجد فئات. أرسل /category ثم رمز المنتج ثم رموز الفئات."))
         elif (len(parts) <= 7 and all(TOPIC_PATTERN.fullmatch(topic) and topic not in ("all", "none") for topic in parts[2:])) or parts[2:] == ["none"]:
             with db:
                 db.execute("INSERT OR IGNORE INTO notification_skus VALUES (?)", (sku,))
                 db.execute("DELETE FROM product_topics WHERE sku=?", (sku,))
                 if parts[2:] != ["none"]:
                     db.executemany("INSERT OR IGNORE INTO product_topics VALUES (?, ?)", ((sku, topic) for topic in parts[2:]))
-            send(chat_id, f"Categories updated for {sku}. Set them before the first /publish or /announce.")
+            send(chat_id, f"تم تحديث فئات {sku}. حددها قبل أول /publish أو /announce.")
         else:
-            send(chat_id, "Use up to 5 category keys (lowercase letters, digits, _ or -; max 24 characters). Example: /category SKU women collections. Use none to clear.")
+            send(chat_id, "أدخل حتى ٥ رموز فئات بالأحرف اللاتينية الصغيرة والأرقام و_ أو -، بحد أقصى ٢٤ حرفًا. مثال: /category p0001 women collections. أرسل none للحذف.")
     elif action == "/announce":
         if len(parts) != 2:
-            send(chat_id, "Usage: /announce SKU")
+            send(chat_id, "أرسل /announce ثم رمز المنتج")
             return
         with db:
             queued = queue_arrival(db, sku)
-        send(chat_id, "New-arrival alerts queued for existing subscribers." if queued else "This product was already announced; no duplicate alerts queued.")
+        send(chat_id, "أُضيفت تنبيهات المنتجات الجديدة للمشتركين الحاليين إلى قائمة الإرسال." if queued else "سبق الإعلان عن المنتج؛ لم تتم إضافة تنبيهات مكررة.")
 
 
 def process_notifications(db, products, username, api, now=None):
@@ -225,7 +241,7 @@ def process_notifications(db, products, username, api, now=None):
             db.execute("UPDATE notification_jobs SET next_attempt=? WHERE id=?", (now + 60, job["id"]))
         return
     title = "🔔 متوفر من جديد" if job["kind"] == "restock" else "✨ جديد LuxeVista"
-    markup = {"inline_keyboard": [[{"text": "🛒 Order now | اطلب الآن",
+    markup = {"inline_keyboard": [[{"text": "🛒 اطلب الآن",
                "url": f"https://t.me/{username}?start=p_{job['sku']}_{job['kind']}"}],
                [{"text": "🔕 إيقاف جميع التنبيهات", "callback_data": "notifications:off"}]]}
     with db:

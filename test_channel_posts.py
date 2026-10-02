@@ -113,7 +113,7 @@ class ChannelLinkTests(BotTestCase):
     def test_missing_edit_permission_stops_before_import(self):
         self.can_edit = False
         self.edit()
-        self.assertIn('Enable Edit Messages', self.sent_text())
+        self.assertIn('فعّل صلاحية تعديل الرسائل', self.sent_text())
         self.assertFalse(any(m == 'forwardMessage' for m, d in self.calls))
         self.assertIsNone(self.imported())
 
@@ -132,7 +132,7 @@ class ChannelLinkTests(BotTestCase):
     def test_edit_failure_keeps_saved_product_and_retry_does_not_duplicate(self):
         self.fail_method = 'editMessageCaption'
         self.edit()
-        self.assertIn('p0002 is saved', self.sent_text())
+        self.assertIn('تم حفظ المنتج p0002', self.sent_text())
         self.assertIn('p0002', self.bot.load_products())
         self.fail_method = None
         self.edit()
@@ -175,7 +175,7 @@ class ChannelLinkTests(BotTestCase):
         self.bot.api = fail_button
         self.edit()
         self.assertIsNone(self.imported()['cta_message_id'])
-        self.assertIn('Post updated in place', self.sent_text())
+        self.assertIn('تم تحديث المنشور', self.sent_text())
         channel_failures[0] = False
         self.edit()
         self.assertIsNone(self.imported()['cta_message_id'])

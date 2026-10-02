@@ -229,7 +229,7 @@ class OrderFlowTests(BotTestCase):
         self.assertIn("🟨", caption)
         self.assertNotIn("Delivery fee", caption)
         self.assertNotIn("رسوم التوصيل", caption)
-        self.assertIn("Minimum: 10 pieces", caption)
+        self.assertIn("الحد الأدنى: 10 قطع", caption)
         self.assertIn("الحد الأدنى", caption)
         self.assertNotIn("120", caption)
         self.assertIn("LUXEVISTA", caption)
@@ -238,9 +238,11 @@ class OrderFlowTests(BotTestCase):
         self.assertIn("⌚ ساعة", labels)
         self.assertTrue(any(label == "150 DH" and entity["type"] == "text_link"
                             for label, entity in zip(labels, entities)))
-        self.assertIn("Order now", caption)
+        self.assertIn("اطلب الآن", caption)
+        self.assertNotIn("Order now", caption)
+        self.assertNotIn("per item", caption)
         product["description"] = "⌚" * 1100
-        with self.assertRaisesRegex(RuntimeError, "too long"):
+        with self.assertRaisesRegex(RuntimeError, "طويل جدًا"):
             self.bot.product_post_caption(product, "TestBot", "channel", album=True)
 
     def test_customers_only_see_their_own_orders_including_older_pages(self):
@@ -706,7 +708,7 @@ class NotificationTests(BotTestCase):
         self.assertEqual(media[0]["caption_entities"][-1]["type"], "text_link")
         ctas = [data for method, data in self.calls if method == "sendMessage" and data["chat_id"] == "@testchannel"]
         self.assertEqual(ctas, [])
-        self.assertIn("Order now", media[0]["caption"])
+        self.assertIn("اطلب الآن", media[0]["caption"])
         self.assertIsNone(self.db.execute("SELECT cta_message_id FROM published_albums").fetchone()[0])
         self.bot.publish_album(999, "album", "p0001", True, self.products, self.db, "TestBot")
         self.assertEqual(sum(method == "sendMediaGroup" for method, data in self.calls), 2)

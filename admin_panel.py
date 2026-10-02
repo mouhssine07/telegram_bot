@@ -7,10 +7,11 @@ import uuid
 import shop_updates as shop
 
 
-STATUSES = {"new": "🆕 New / Reopen", "confirmed": "✅ Confirmed", "shipped": "🚚 Shipped",
-            "delivered": "📦 Delivered", "cancelled": "❌ Cancelled"}
-FIELDS = {"name": "name", "price_dh": "price in whole DH", "description": "description",
-          "stock": "available stock (0–999999)", "categories": "categories, e.g. women collections (or none)"}
+STATUSES = {"new": "🆕 جديد / إعادة فتح", "confirmed": "✅ مؤكد", "shipped": "🚚 تم الشحن",
+            "delivered": "📦 تم التسليم", "cancelled": "❌ ملغى"}
+PERIODS = {"all": "كل الفترات", "today": "اليوم", "month": "هذا الشهر"}
+FIELDS = {"name": "اسم المنتج", "price_dh": "السعر بالدرهم دون كسور", "description": "الوصف",
+          "stock": "المخزون المتاح (٠–٩٩٩٩٩٩)", "categories": "رموز الفئات مثل women collections (أو none للحذف)"}
 
 
 def init_schema(db):
@@ -81,7 +82,7 @@ def order_buttons(db, order):
                for status, label in STATUSES.items() if status != order["status"]]
     rows = [choices[index:index + 2] for index in range(0, len(choices), 2)]
     if order["note_audio_json"]:
-        rows.append([("🎤 Play order audio", f"audio:{key}")])
+        rows.append([("🎤 سماع رسالة الطلب", f"audio:{key}")])
     return rows
 
 
@@ -103,31 +104,31 @@ class Panel:
 
     def home(self, chat_id):
         clear_editor(self.db, chat_id)
-        self.send(chat_id, "LuxeVista — Admin panel\nChoose what to manage. Stock changes only when you set it.", [
-            [("📋 Orders", "adm:orders:0:all"), ("🆕 New orders", "adm:orders:0:new")],
-            [("⌚ Products & stock", "adm:products:0"), ("➕ Add product", "adm:add")],
-            [("📊 Sales totals", "adm:sales:all")],
-            *([[("👥 Team access", "adm:team")]] if is_owner(self.owner, chat_id) else [])])
+        self.send(chat_id, "LuxeVista — لوحة الإدارة\nاختر القسم المطلوب. يتغير المخزون فقط عند تعديله يدويًا.", [
+            [("📋 الطلبات", "adm:orders:0:all"), ("🆕 الطلبات الجديدة", "adm:orders:0:new")],
+            [("⌚ المنتجات والمخزون", "adm:products:0"), ("➕ إضافة منتج", "adm:add")],
+            [("📊 إجمالي المبيعات", "adm:sales:all")],
+            *([[("👥 صلاحيات الفريق", "adm:team")]] if is_owner(self.owner, chat_id) else [])])
 
     def orders(self, chat_id, page=0, status="all"):
         where, params = ("", ()) if status == "all" else (" WHERE status=?", (status,))
         rows = self.db.execute("SELECT * FROM orders" + where + " ORDER BY id DESC LIMIT 6 OFFSET ?",
                                (*params, page * 5)).fetchall()
         if not rows:
-            self.send(chat_id, "No orders on this page.", [[("Admin panel", "adm:home")]])
+            self.send(chat_id, "لا توجد طلبات في هذه الصفحة.", [[("لوحة الإدارة", "adm:home")]])
             return
         for order in rows[:5]:
             self.send(chat_id, self.order_message(order), order_buttons(self.db, order))
         nav = []
         if page:
-            nav.append(("← Previous", f"adm:orders:{page - 1}:{status}"))
+            nav.append(("← السابق", f"adm:orders:{page - 1}:{status}"))
         if len(rows) > 5:
-            nav.append(("Next →", f"adm:orders:{page + 1}:{status}"))
-        self.send(chat_id, f"Orders — {status}, page {page + 1}", ([nav] if nav else []) + [
-            [("New", "adm:orders:0:new"), ("Confirmed", "adm:orders:0:confirmed")],
-            [("Shipped", "adm:orders:0:shipped"), ("Delivered", "adm:orders:0:delivered")],
-            [("Cancelled", "adm:orders:0:cancelled"), ("All", "adm:orders:0:all")],
-            [("Admin panel", "adm:home")]])
+            nav.append(("التالي →", f"adm:orders:{page + 1}:{status}"))
+        self.send(chat_id, f"الطلبات — {STATUSES.get(status, 'الكل')}، الصفحة {page + 1}", ([nav] if nav else []) + [
+            [("جديد", "adm:orders:0:new"), ("مؤكد", "adm:orders:0:confirmed")],
+            [("تم الشحن", "adm:orders:0:shipped"), ("تم التسليم", "adm:orders:0:delivered")],
+            [("ملغى", "adm:orders:0:cancelled"), ("الكل", "adm:orders:0:all")],
+            [("لوحة الإدارة", "adm:home")]])
 
     def change_status(self, chat_id, key, version, status):
         with self.db:
@@ -142,36 +143,34 @@ class Panel:
             else:
                 changed = False
         if not order:
-            self.send(chat_id, "This order was deleted. Open /admin for current orders.")
+            self.send(chat_id, "تم حذف هذا الطلب. افتح /admin لعرض الطلبات الحالية.")
             return
         current = self.db.execute("SELECT * FROM orders WHERE admin_key=?", (key,)).fetchone()
-        notice = "Status updated.\n\n" if changed else "This button is outdated or already applied. Current order:\n\n"
+        notice = "تم تحديث الحالة.\n\n" if changed else "هذا الزر قديم أو تم تطبيقه مسبقًا. الطلب الحالي:\n\n"
         if changed and status == "confirmed":
             try:
                 self.send(current["chat_id"],
                           f"✅ تم تأكيد طلبك #{current['id']}\n"
                           "شكرًا لاختيارك LuxeVista. سنتواصل معك بخصوص التوصيل.\n\n"
-                          f"✅ Your order #{current['id']} is confirmed\n"
-                          "Thank you for choosing LuxeVista. We will contact you about delivery.\n\n"
                           f"{item_summary(order_items(current))}\n"
-                          f"المجموع بدون التوصيل | Total excluding delivery: "
+                          f"المجموع بدون التوصيل: "
                           f"{order_total(current)} DH\n\n"
-                          "لمتابعة طلبك | View your order: /orders")
-                notice = "Status updated. Arabic/English confirmation sent to the customer.\n\n"
+                          "لمتابعة طلبك: /orders")
+                notice = "تم تحديث الحالة. تم إرسال التأكيد بالعربية إلى العميل.\n\n"
             except RuntimeError:
-                notice = ("Status updated, but the customer confirmation could not be delivered. "
-                          "Contact the customer directly; the order remains confirmed.\n\n")
+                notice = ("تم تحديث الحالة، لكن تعذّر إرسال التأكيد إلى العميل. "
+                          "تواصل مع العميل مباشرة؛ الطلب ما زال مؤكدًا.\n\n")
         self.send(chat_id, notice
                   + self.order_message(current), order_buttons(self.db, current))
 
     def confirm_order(self, chat_id, parts):
         if (len(parts) != 2 or not re.fullmatch(r"[1-9][0-9]{0,18}", parts[1])
                 or int(parts[1]) > 9223372036854775807):
-            self.send(chat_id, "Usage: /confirm ORDER_NUMBER\nExample: /confirm 2\nUse /orders to check current order numbers.")
+            self.send(chat_id, "لتأكيد طلب: أرسل /confirm ثم رقمه\nمثال: /confirm 2\nتحقق من أرقام الطلبات الحالية عبر /orders.")
             return
         order = self.db.execute("SELECT * FROM orders WHERE id=?", (int(parts[1]),)).fetchone()
         if not order:
-            self.send(chat_id, "Order not found. Use /orders to check current order numbers.")
+            self.send(chat_id, "الطلب غير موجود. تحقق من أرقام الطلبات الحالية عبر /orders.")
             return
         # Legacy rows may not have acquired their permanent button reference yet.
         order_buttons(self.db, order)
@@ -184,42 +183,42 @@ class Panel:
         rows = self.db.execute("""SELECT status, count(*) AS orders, sum(quantity) AS units,
             sum(COALESCE(total_dh, unit_price_dh * quantity)) AS value FROM orders""" + where + " GROUP BY status").fetchall()
         by_status = {row["status"]: row for row in rows}
-        lines = [f"📊 Orders placed: {period} (UTC)", "Current status / orders / units / value (DH)"]
+        lines = [f"📊 الطلبات: {PERIODS[period]} (التوقيت العالمي)", "الحالة الحالية / الطلبات / القطع / القيمة بالدرهم"]
         for status in dict.fromkeys([*STATUSES, *by_status]):
             row = by_status.get(status)
-            lines.append(f"{status}: {row['orders'] if row else 0} / {row['units'] if row else 0} / {row['value'] if row else 0} DH")
+            lines.append(f"{STATUSES.get(status, 'غير معروف')}: {row['orders'] if row else 0} / {row['units'] if row else 0} / {row['value'] if row else 0} DH")
         delivered = by_status.get("delivered")
-        lines += [f"\nDelivered order value: {delivered['value'] if delivered else 0} DH",
-                  "Product totals only; delivery fees, costs and payment collection are not tracked.",
-                  "Cancelled orders are excluded from delivered value. Deleted orders are excluded from this report."]
-        self.send(chat_id, "\n".join(lines), [[("Today", "adm:sales:today"), ("This month", "adm:sales:month"),
-                  ("All time", "adm:sales:all")], [("Admin panel", "adm:home")]])
+        lines += [f"\nقيمة الطلبات المسلمة: {delivered['value'] if delivered else 0} DH",
+                  "إجمالي المنتجات فقط؛ لا يشمل رسوم التوصيل أو التكاليف أو متابعة التحصيل.",
+                  "الطلبات الملغاة غير مشمولة في قيمة الطلبات المسلمة، والمحذوفة غير مشمولة في التقرير."]
+        self.send(chat_id, "\n".join(lines), [[("اليوم", "adm:sales:today"), ("هذا الشهر", "adm:sales:month"),
+                  ("كل الفترات", "adm:sales:all")], [("لوحة الإدارة", "adm:home")]])
 
     def product_list(self, chat_id, page=0):
         products = list(self.products.values())
         rows = [[(f"{p['sku']} — {p['name'][:50]}", f"adm:p:{p['sku']}")] for p in products[page * 10:page * 10 + 10]]
         nav = []
         if page:
-            nav.append(("← Previous", f"adm:products:{page - 1}"))
+            nav.append(("← السابق", f"adm:products:{page - 1}"))
         if len(products) > (page + 1) * 10:
-            nav.append(("Next →", f"adm:products:{page + 1}"))
-        self.send(chat_id, f"Products — page {page + 1}", rows + ([nav] if nav else []) + [
-            [("➕ Add product", "adm:add"), ("Admin panel", "adm:home")]])
+            nav.append(("التالي →", f"adm:products:{page + 1}"))
+        self.send(chat_id, f"المنتجات — الصفحة {page + 1}", rows + ([nav] if nav else []) + [
+            [("➕ إضافة منتج", "adm:add"), ("لوحة الإدارة", "adm:home")]])
 
     def product(self, chat_id, sku):
         p = self.products.get(sku)
         if not p:
-            self.send(chat_id, "Product no longer exists. Open /admin for the current catalog.")
+            self.send(chat_id, "المنتج لم يعد موجودًا. افتح /admin لعرض الكتالوج الحالي.")
             return
         stock = shop.stock(self.db, sku)
         categories = [row[0] for row in self.db.execute("SELECT topic FROM product_topics WHERE sku=? ORDER BY topic", (sku,))]
         self.send(chat_id, f"{sku} — {p['name']}\n{p['price_dh']} DH\n"
-                  f"Stock: {stock if stock is not None else 'not tracked'}\nCategories: {', '.join(categories) or 'none'}\n\n"
+                  f"المخزون: {stock if stock is not None else 'غير محدد'}\nالفئات: {', '.join(shop.TOPICS.get(c, c) for c in categories) or 'بدون فئات'}\n\n"
                   + p.get("description", "")[:1500], [
-            [("Edit name", f"adm:e:{sku}:name"), ("Edit price", f"adm:e:{sku}:price_dh")],
-            [("Edit description", f"adm:e:{sku}:description")],
-            [("Set stock", f"adm:e:{sku}:stock"), ("Set categories", f"adm:e:{sku}:categories")],
-            [("Products", "adm:products:0"), ("Admin panel", "adm:home")]])
+            [("تعديل الاسم", f"adm:e:{sku}:name"), ("تعديل السعر", f"adm:e:{sku}:price_dh")],
+            [("تعديل الوصف", f"adm:e:{sku}:description")],
+            [("تحديد المخزون", f"adm:e:{sku}:stock"), ("تحديد الفئات", f"adm:e:{sku}:categories")],
+            [("المنتجات", "adm:products:0"), ("لوحة الإدارة", "adm:home")]])
 
     def edit(self, chat_id, sku, field):
         if sku not in self.products:
@@ -230,8 +229,8 @@ class Panel:
         with self.db:
             self.db.execute("INSERT INTO admin_sessions VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET data=excluded.data",
                             (chat_id, json.dumps(data, ensure_ascii=False)))
-        self.send(chat_id, f"Editing {sku} — {self.products[sku]['name']}\nSend the new {FIELDS[field]}.\n"
-                  "Use /cancel to stop. Use - for an empty description.")
+        self.send(chat_id, f"تعديل {sku} — {self.products[sku]['name']}\nأرسل {FIELDS[field]} الجديد.\n"
+                  "للإلغاء: /cancel. أرسل - لحذف الوصف.")
 
     def editor_text(self, chat_id, raw):
         row = self.db.execute("SELECT data FROM admin_sessions WHERE chat_id=?", (chat_id,)).fetchone()
@@ -247,29 +246,29 @@ class Panel:
         if (current != data["product"] or (field == "stock" and shop.stock(self.db, sku) != data["stock"])
                 or (field == "categories" and categories != data["categories"])):
             clear_editor(self.db, chat_id)
-            self.send(chat_id, "This product changed or was removed while you were editing. Reopen it in /admin before editing again.")
+            self.send(chat_id, "تغير المنتج أو حُذف أثناء التعديل. افتحه مجددًا عبر /admin قبل إعادة التعديل.")
             return True
         value = raw.strip()
         if field in ("price_dh", "stock"):
             if not re.fullmatch(r"[0-9]{1,6}", value):
-                self.send(chat_id, "Enter a whole number from 0 to 999999, or /cancel.")
+                self.send(chat_id, "أدخل عددًا صحيحًا من ٠ إلى ٩٩٩٩٩٩، أو /cancel للإلغاء.")
                 return True
             value = int(value)
         elif field == "name":
             value = " ".join(value.split())
             if not 1 <= len(value) <= 100:
-                self.send(chat_id, "Use a product name of 1–100 characters, or /cancel.")
+                self.send(chat_id, "أدخل اسمًا من حرف واحد إلى ١٠٠ حرف، أو /cancel للإلغاء.")
                 return True
         elif field == "description":
             value = "" if value == "-" else value
             if len(value) > 950:
-                self.send(chat_id, "Description must be at most 950 characters, or /cancel.")
+                self.send(chat_id, "الحد الأقصى للوصف ٩٥٠ حرفًا، أو /cancel للإلغاء.")
                 return True
         elif field == "categories":
             parts = value.split()
             if parts != ["none"] and (not 1 <= len(parts) <= 5 or not all(
                     shop.TOPIC_PATTERN.fullmatch(topic) and topic not in ("all", "none") for topic in parts)):
-                self.send(chat_id, "Use up to five category keys, e.g. women collections, or none to clear.")
+                self.send(chat_id, "أدخل حتى خمسة رموز للفئات، مثل women collections، أو none لحذفها.")
                 return True
         if field == "stock":
             shop.set_stock(self.db, sku, value)
@@ -281,26 +280,26 @@ class Panel:
             self.products.clear()
             self.products.update(updated)
         clear_editor(self.db, chat_id)
-        self.send(chat_id, "Saved." + (f" Send /edit {sku} to update existing channel posts with these details." if field in ("name", "price_dh", "description") else ""))
+        self.send(chat_id, "تم الحفظ." + (f" أرسل /edit {sku} لتحديث منشورات القناة بهذه التفاصيل." if field in ("name", "price_dh", "description") else ""))
         self.product(chat_id, sku)
         return True
 
     def team(self, chat_id, parts):
         if not is_owner(self.owner, chat_id):
-            self.send(chat_id, "Only the main admin can manage team access.")
+            self.send(chat_id, "المسؤول الرئيسي فقط يمكنه إدارة صلاحيات الفريق.")
             return
         if len(parts) == 1:
             members = [str(row[0]) for row in self.db.execute("SELECT chat_id FROM admin_team ORDER BY chat_id")]
-            self.send(chat_id, "Team: " + (", ".join(members) or "no teammates yet") + "\n"
-                      "Ask a teammate to open the bot and send /id.\n/team add CHAT_ID\n/team remove CHAT_ID\n"
-                      "Teammates can see all customer orders, change statuses, edit products/stock, and publish. Only you can manage access or permanently delete orders.")
+            self.send(chat_id, "الفريق: " + (", ".join(members) or "لا يوجد أعضاء بعد") + "\n"
+                      "اطلب من العضو فتح البوت وإرسال /id.\n/team add CHAT_ID\n/team remove CHAT_ID\n"
+                      "يمكن لأعضاء الفريق رؤية جميع الطلبات وتغيير حالاتها وتعديل المنتجات والمخزون والنشر. أنت وحدك تستطيع إدارة الصلاحيات أو حذف الطلبات نهائيًا.")
             return
         if len(parts) != 3 or parts[1] not in ("add", "remove") or not re.fullmatch(r"[1-9][0-9]{0,15}", parts[2]):
-            self.send(chat_id, "Usage: /team add CHAT_ID or /team remove CHAT_ID (positive numeric private chat ID).")
+            self.send(chat_id, "أرسل /team add ثم معرّف المحادثة للإضافة، أو /team remove ثم المعرّف للإزالة. يجب أن يكون المعرّف رقمًا موجبًا لمحادثة خاصة.")
             return
         target = int(parts[2])
         if is_owner(self.owner, target):
-            self.send(chat_id, "The main admin is configured in .env and cannot be changed here.")
+            self.send(chat_id, "المسؤول الرئيسي محدد في .env ولا يمكن تغييره هنا.")
             return
         with self.db:
             if parts[1] == "add":
@@ -308,13 +307,13 @@ class Panel:
             else:
                 self.db.execute("DELETE FROM admin_team WHERE chat_id=?", (target,))
                 self.db.execute("DELETE FROM admin_sessions WHERE chat_id=?", (target,))
-        self.send(chat_id, f"Team access {'granted' if parts[1] == 'add' else 'revoked'} for {target}.")
+        self.send(chat_id, f"تم {'منح' if parts[1] == 'add' else 'إلغاء'} صلاحيات الفريق للمعرّف {target}.")
 
     def add_product(self, chat_id):
         clear_editor(self.db, chat_id)
-        self.send(chat_id, "Send a product photo or album here. Start the caption with its name and include one whole-DH price.\n"
-                  "Example:\nLuxeVista watch\n120 DH\n\nThe bot assigns its SKU. Then open Products to edit it or set stock. "
-                  "Reply to the original photo with /preview, then /publish when ready.")
+        self.send(chat_id, "أرسل صورة المنتج أو ألبومًا هنا. ابدأ الوصف بالاسم وأضف سعرًا واحدًا بالدرهم دون كسور.\n"
+                  "مثال:\nساعة LuxeVista\n120 درهم\n\nيحدد البوت رمز المنتج. افتح المنتجات لتعديله أو تحديد المخزون. "
+                  "Reply to the original photo with /preview, then /publish عندما تكون جاهزًا.")
 
     def command(self, chat_id, raw):
         parts = raw.split()
@@ -336,7 +335,7 @@ class Panel:
         elif parts[0] == "/addproduct" and len(parts) == 1:
             self.add_product(chat_id)
         else:
-            self.send(chat_id, "Use /admin, /products, /addproduct, or /sales [all|today|month].")
+            self.send(chat_id, "للإدارة: /admin، للمنتجات: /products، للإضافة: /addproduct، للمبيعات: /sales متبوعًا بالفترة all أو today أو month.")
         return True
 
     def callback(self, chat_id, command):
@@ -366,5 +365,5 @@ class Panel:
               and re.fullmatch(r"[0-9]{1,8}", parts[3]) and parts[4] in STATUSES):
             self.change_status(chat_id, parts[2], int(parts[3]), parts[4])
         else:
-            self.send(chat_id, "This action is unavailable. Open /admin again.")
+            self.send(chat_id, "هذا الإجراء غير متاح. افتح /admin مجددًا.")
         return True

@@ -8,7 +8,7 @@ from test_bot import BotTestCase
 
 
 class AdminPanelTests(BotTestCase):
-    def test_confirm_command_notifies_only_customer_once_in_both_languages(self):
+    def test_confirm_command_notifies_only_customer_once_in_arabic_only(self):
         self.insert_order(101, "Customer X")
         self.insert_order(202, "Customer Y")
         self.text(999, "/confirm 1")
@@ -16,7 +16,7 @@ class AdminPanelTests(BotTestCase):
         messages = [data for method, data in self.calls if method == "sendMessage" and data["chat_id"] == 101]
         self.assertEqual(len(messages), 1)
         self.assertIn("تم تأكيد طلبك #1", messages[0]["text"])
-        self.assertIn("Your order #1 is confirmed", messages[0]["text"])
+        self.assertNotIn("Your order", messages[0]["text"])
         self.assertFalse(any(data.get("chat_id") == 202 for method, data in self.calls))
         self.assertEqual(self.db.execute("SELECT count(*) FROM order_status_history").fetchone()[0], 1)
 
@@ -49,7 +49,7 @@ class AdminPanelTests(BotTestCase):
         self.bot.api = failing_api
         self.text(999, "/confirm 1")
         self.assertEqual(self.db.execute("SELECT status FROM orders").fetchone()[0], "confirmed")
-        self.assertIn("could not be delivered", self.sent_text())
+        self.assertIn("تعذّر إرسال التأكيد", self.sent_text())
 
     def status_button(self, order_id, status):
         order = self.db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
@@ -160,7 +160,7 @@ class AdminPanelTests(BotTestCase):
         self.callback(999, self.status_button(1, "cancelled"), 50)
         self.calls.clear()
         self.text(101, "/orders")
-        self.assertIn("cancelled", self.sent_text())
+        self.assertIn("ملغى", self.sent_text())
         self.assertNotIn("Customer Y", self.sent_text())
 
     def test_product_edit_preserves_extra_fields_other_products_and_order_snapshots(self):
@@ -252,15 +252,15 @@ class AdminPanelTests(BotTestCase):
         self.products["p0001"]["price_dh"] = 999
         self.bot.save_products(self.products)
         self.text(999, "/sales")
-        self.assertIn("Delivered order value: 240 DH", self.sent_text())
-        self.assertIn("cancelled: 1 / 1 / 120 DH", self.sent_text())
-        self.assertIn("confirmed: 1 / 1 / 120 DH", self.sent_text())
+        self.assertIn("قيمة الطلبات المسلمة: 240 DH", self.sent_text())
+        self.assertIn("ملغى: 1 / 1 / 120 DH", self.sent_text())
+        self.assertIn("مؤكد: 1 / 1 / 120 DH", self.sent_text())
         self.calls.clear()
         self.db.execute("UPDATE orders SET created_at=datetime('now','-40 days') WHERE id=1")
         self.db.commit()
         self.text(999, "/sales today")
-        self.assertIn("Delivered order value: 0 DH", self.sent_text())
-        self.assertIn("UTC", self.sent_text())
+        self.assertIn("قيمة الطلبات المسلمة: 0 DH", self.sent_text())
+        self.assertIn("التوقيت العالمي", self.sent_text())
 
     def test_panel_pagination_and_status_filter(self):
         for i in range(7):

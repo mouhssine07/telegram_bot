@@ -94,7 +94,7 @@ def keyboard(rows: list[list[tuple[str, str]]]) -> str:
 
 def order_link_keyboard(bot_username: str, sku: str, source: str) -> str:
     url = f"https://t.me/{bot_username}?start=p_{sku}_{source}"
-    return json.dumps({"inline_keyboard": [[{"text": "🛒 Order now | اطلب الآن", "url": url}]]}, ensure_ascii=False)
+    return json.dumps({"inline_keyboard": [[{"text": "🛒 اطلب الآن", "url": url}]]}, ensure_ascii=False)
 
 
 def product_post_caption(product: dict, bot_username: str, source: str,
@@ -127,14 +127,14 @@ def product_post_caption(product: dict, bot_username: str, source: str,
     append(f"{product['price_dh']} DH", "bold")
     entities.append({**entities[-1], "type": "text_link",
                      "url": f"https://t.me/{bot_username}?start=p_{product['sku']}_{source}"})
-    append("  ·  للوحدة | per item\n")
-    append("الحد الأدنى: 10 قطع | Minimum: 10 pieces", "italic")
+    append("  ·  للوحدة\n")
+    append("الحد الأدنى: 10 قطع", "italic")
     append("\n\n────────────────\n")
-    append("🛍 اطلب الآن | Order now", "bold")
+    append("🛍 اطلب الآن", "bold")
     entities.append({**entities[-1], "type": "text_link",
                      "url": f"https://t.me/{bot_username}?start=p_{product['sku']}_{source}"})
     if len(caption.encode("utf-16-le")) // 2 > 1024:
-        raise RuntimeError("Product caption is too long for the new layout. Shorten its description in /products and preview again.")
+        raise RuntimeError("وصف المنتج طويل جدًا. اختصره عبر /products وأعد المعاينة.")
     return caption, entities
 
 
@@ -194,11 +194,11 @@ def parse_product_caption(caption: str) -> tuple[str, str, int]:
     prices = {int(match.group(1)) for match in all_matches}
     if (len(caption) > 950 or not all_matches or len(prices) != 1
             or any(match.group(2) and int(match.group(2)) != 0 for match in all_matches)):
-        raise ValueError("Caption must contain one unambiguous whole-DH price (for example, 110 DH or 110 درهم).")
+        raise ValueError("يجب أن يتضمن الوصف سعرًا واحدًا واضحًا بالدرهم دون كسور (مثل 110 درهم).")
     first_line = caption.splitlines()[0].strip()
     name = re.split(r"\s*(?:—|–|\|+|--+)\s*", first_line, maxsplit=1)[0].strip(" -:…")
     if not name or PRICE_PATTERN.search(name) or len(name) > 100:
-        raise ValueError("Start the caption with a short product name, then put the price in DH.")
+        raise ValueError("ابدأ الوصف باسم منتج قصير، ثم أضف السعر بالدرهم.")
     return name, caption, prices.pop()
 
 
@@ -376,7 +376,7 @@ def send_product_photos(chat_id: int, product: dict, db: sqlite3.Connection) -> 
                 api("sendPhoto" if linked["kind"] == "photo" else "sendVideo",
                     {"chat_id": chat_id, linked["kind"]: linked["file_id"], "caption": product["name"]})
             except RuntimeError:
-                send(chat_id, "Product photo unavailable. You can still order below.")
+                send(chat_id, "صورة المنتج غير متاحة. يمكنك الطلب أدناه.")
         return
     try:
         api("copyMessage", {"chat_id": chat_id,
@@ -393,8 +393,8 @@ def show_product(chat_id: int, product: dict, db: sqlite3.Connection, source: st
     if include_photos:
         send_product_photos(chat_id, product, db)
     unavailable = shop.stock(db, sku) == 0
-    buttons = [[("🔔 Notify me when available | أخبرني عند التوفر", f"restock:{sku}")]] if unavailable else [
-        [("🛍 اطلب الآن | Order now", f"order:{sku}:{source}")]]
+    buttons = [[("🔔 أخبرني عند التوفر", f"restock:{sku}")]] if unavailable else [
+        [("🛍 اطلب الآن", f"order:{sku}:{source}")]]
     send_order(db, chat_id,
          f"{product['name']}\n{product.get('description', '')}\n\n"
          f"السعر: {product['price_dh']} درهم للوحدة\n"
@@ -424,11 +424,11 @@ def publish_album(chat_id: int, media_group_id: str, sku: str, is_publish: bool,
         WHERE source_chat_id=? AND media_group_id=? ORDER BY source_message_id""",
         (chat_id, media_group_id)).fetchall()
     if not 2 <= len(rows) <= 10 or not all(row["file_id"] for row in rows):
-        send(chat_id, "Send all product photos together as one album, then reply to any photo with /preview " + sku)
+        send(chat_id, "أرسل صور المنتج معًا كألبوم، ثم رد على إحدى الصور بالأمر /preview " + sku)
         return
     caption_row = next((row for row in rows if row["caption"]), None)
     if not caption_row:
-        send(chat_id, "This album has no description. Add a caption to one photo and send the album again.")
+        send(chat_id, "هذا الألبوم بدون وصف. أضف وصفًا لإحدى الصور وأعد إرساله.")
         return
     prior = None
     if is_publish:
@@ -436,7 +436,7 @@ def publish_album(chat_id: int, media_group_id: str, sku: str, is_publish: bool,
             WHERE source_chat_id=? AND media_group_id=? AND sku=? AND target_chat_id=?""",
             (chat_id, media_group_id, sku, CHANNEL_ID)).fetchone()
         if prior:
-            send(chat_id, "This album was already published. Check the channel before posting it again.")
+            send(chat_id, "سبق نشر هذا الألبوم. تحقق من القناة قبل إعادة نشره.")
             return
     if not prior:
         caption, entities = product_post_caption(
@@ -454,14 +454,14 @@ def publish_album(chat_id: int, media_group_id: str, sku: str, is_publish: bool,
     if is_publish:
         with db:
             shop.queue_arrival(db, sku)
-        send(chat_id, f"✅ Product album published to {CHANNEL_ID} with an Order now link in its caption.")
+        send(chat_id, f"✅ نُشر ألبوم المنتج في {CHANNEL_ID} مع رابط الطلب في الوصف.")
     else:
-        send(chat_id, f"Album preview above ({len(rows)} separate photos). Reply to the original album with /publish {sku} when ready.")
+        send(chat_id, f"معاينة الألبوم أعلاه ({len(rows)} صور منفصلة). للنشر، رد على الألبوم الأصلي بالأمر /publish {sku}.")
 
 
 def edit_published_product(chat_id, command, products, db, bot_username):
     if not admin.is_admin(db, ADMIN_CHAT_ID, chat_id):
-        send(chat_id, "هذا الأمر مخصص للمسؤول. | Admin access required.")
+        send(chat_id, "هذا الأمر مخصص للمسؤول.")
         return
     parts = command.split()
     if len(parts) == 2 and parts[1].startswith("https://"):
@@ -470,21 +470,21 @@ def edit_published_product(chat_id, command, products, db, bot_username):
                 api=api, save_products=save_products, next_sku=next_sku, parse_caption=parse_product_caption,
                 caption=product_post_caption, keyboard=order_link_keyboard)
         except (RuntimeError, ValueError, OSError, sqlite3.Error) as exc:
-            send(chat_id, f"Could not complete the post update: {exc}")
+            send(chat_id, f"تعذّر إكمال تحديث المنشور: {shop.error_message(exc)}")
             return
-        send(chat_id, f"✅ Post updated in place. Product: {sku}\n{products[sku]['name']} — {products[sku]['price_dh']} DH\n"
-             f"Manage it in /products. Next time use /edit {sku} or the same post link.")
+        send(chat_id, f"✅ تم تحديث المنشور. المنتج: {sku}\n{products[sku]['name']} — {products[sku]['price_dh']} DH\n"
+             f"لإدارة المنتج: /products. للتحديث لاحقًا: /edit {sku} أو نفس رابط المنشور.")
         return
     if len(parts) not in (2, 3):
-        send(chat_id, "Usage: /edit TELEGRAM_POST_LINK to import and format a post, or /edit SKU to apply saved product details.\n"
-             "Example: /edit https://t.me/yourchannel/123\nFor reference repairs: /edit SKU TELEGRAM_POST_LINK")
+        send(chat_id, "لاستيراد منشور وتنسيقه: أرسل /edit متبوعًا برابطه. لتطبيق تفاصيل المنتج المحفوظة: /edit متبوعًا برمز المنتج.\n"
+             "مثال: /edit https://t.me/yourchannel/123\nلإصلاح مرجع المنشور: أرسل /edit ثم رمز المنتج ثم رابط المنشور.")
         return
     sku = parts[1]
     if sku not in products:
-        send(chat_id, "Product not found. Choose its SKU from /products.")
+        send(chat_id, "المنتج غير موجود. اختر رمزه من /products.")
         return
     if not CHANNEL_ID:
-        send(chat_id, "Set CHANNEL_ID in .env and restart the bot first.")
+        send(chat_id, "اضبط CHANNEL_ID في ملف .env وأعد تشغيل البوت أولًا.")
         return
     posts = db.execute("SELECT channel_message_id FROM published_posts WHERE sku=? AND target_chat_id=?",
                        (sku, CHANNEL_ID)).fetchall()
@@ -496,38 +496,38 @@ def edit_published_product(chat_id, command, products, db, bot_username):
         for row in linked:
             try:
                 channel_posts.update(db, row, products[sku], bot_username, api, product_post_caption, order_link_keyboard)
-                send(chat_id, f"✅ {sku}: linked post #{row['message_id']} updated in place.")
+                send(chat_id, f"✅ {sku}: تم تحديث المنشور المرتبط #{row['message_id']}.")
             except RuntimeError as exc:
-                send(chat_id, f"Could not update linked post #{row['message_id']}: {exc}")
+                send(chat_id, f"تعذّر تحديث المنشور المرتبط #{row['message_id']}: {shop.error_message(exc)}")
         if not posts and not albums:
             return
     if not posts and not albums:
-        send(chat_id, f"No recorded channel posts for {sku} in {CHANNEL_ID}. Nothing was published or replaced.")
+        send(chat_id, f"لا توجد منشورات مسجلة للمنتج {sku} في {CHANNEL_ID}. لم يُنشر أو يُستبدل أي شيء.")
         return
     repair_mid = None
     if len(parts) == 3:
         link = re.fullmatch(r"https://t\.me/(?:(c)/([0-9]+)|([A-Za-z0-9_]+))/([1-9][0-9]*)(?:\?single)?", parts[2])
         if not link:
-            send(chat_id, "Use the Telegram post's Copy Link URL, e.g. /edit p0003 https://t.me/yourchannel/123")
+            send(chat_id, "انسخ رابط منشور تيليجرام، مثل: /edit p0003 https://t.me/yourchannel/123")
             return
         if len(posts) + len(albums) != 1:
-            send(chat_id, "This product has multiple recorded publications. A post link cannot safely select which record to repair.")
+            send(chat_id, "لهذا المنتج عدة منشورات مسجلة. لا يمكن تحديد السجل المراد إصلاحه بهذا الرابط.")
             return
         try:
             channel = api("getChat", {"chat_id": CHANNEL_ID})
         except RuntimeError as exc:
-            send(chat_id, f"Could not verify the channel: {exc}")
+            send(chat_id, f"تعذّر التحقق من القناة: {shop.error_message(exc)}")
             return
         matches = (str(channel["id"]) == "-100" + link[2] if link[1]
                    else str(channel.get("username", "")).lower() == link[3].lower())
         if not matches:
-            send(chat_id, "That post link is not from the configured channel. No changes made.")
+            send(chat_id, "الرابط ليس من القناة المحددة. لم يتم إجراء أي تغيير.")
             return
         repair_mid = int(link[4])
     try:
         caption, entities = product_post_caption(products[sku], bot_username, "channel")
     except RuntimeError as exc:
-        send(chat_id, f"Cannot update posts: {exc}")
+        send(chat_id, f"تعذّر تحديث المنشورات: {shop.error_message(exc)}")
         return
     markup = json.dumps({"inline_keyboard": []})
     operations = {}
@@ -553,6 +553,7 @@ def edit_published_product(chat_id, command, products, db, bot_username):
                 "link_preview_options": json.dumps({"is_disabled": True}),
                 "reply_markup": markup}
     updated = unchanged = 0
+    missing_message = False
     failures = []
     repaired = False
     for (method, mid), payload in operations.items():
@@ -568,25 +569,26 @@ def edit_published_product(chat_id, command, products, db, bot_username):
             if isinstance(exc, shop.TelegramError) and exc.code == 400 and "message is not modified" in str(exc).lower():
                 unchanged += 1
             else:
-                failures.append(f"#{mid}: {exc}")
+                missing_message |= "message to edit not found" in str(exc).lower()
+                failures.append(f"#{mid}: {shop.error_message(exc)}")
                 continue
         if method == "editMessageCaption" and repair_mid is not None:
             with db:
                 db.execute("INSERT OR REPLACE INTO post_caption_overrides VALUES (?, ?, ?)",
                            (CHANNEL_ID, original_mid, mid))
             repaired = True
-    message = f"{sku}: {updated} channel message(s) updated; {unchanged} already current."
+    message = f"{sku}: تم تحديث {updated} رسالة في القناة؛ و{unchanged} رسالة محدثة مسبقًا."
     if failures:
-        message += f"\n{len(failures)} update(s) failed. Check bot permissions and whether the posts still exist, then retry /edit {sku}."
+        message += f"\nفشل تحديث {len(failures)} رسالة. تحقق من صلاحيات البوت ووجود المنشورات، ثم أعد /edit {sku}."
         message += "\n" + "\n".join(failures[:5])[:1000]
-        if any("message to edit not found" in failure.lower() for failure in failures):
-            message += (f"\nThe saved message is unavailable in {CHANNEL_ID}. If the product post still exists, "
-                        f"copy its link and send /edit {sku} TELEGRAM_POST_LINK to repair a single publication. "
-                        "For an album, copy the link of the photo carrying its caption. Deleted posts cannot be edited.")
+        if missing_message:
+            message += (f"\nالرسالة المحفوظة غير متاحة في {CHANNEL_ID}. إذا كان المنشور موجودًا، "
+                        f"انسخ رابطه وأرسل /edit {sku} متبوعًا بالرابط لإصلاح منشور واحد. "
+                        "للألبوم، انسخ رابط الصورة التي تحمل الوصف. لا يمكن تعديل المنشورات المحذوفة.")
     if repaired:
-        message += f"\nSaved the corrected caption reference. Next time use /edit {sku}."
+        message += f"\nتم حفظ مرجع الوصف المصحح. استخدم لاحقًا /edit {sku}."
     if invalid_records:
-        message += f"\n{invalid_records} album record(s) have invalid saved message IDs and were skipped."
+        message += f"\nتم تجاوز {invalid_records} سجل ألبوم بسبب معرّفات رسائل غير صالحة."
     send(chat_id, message)
 
 
@@ -608,7 +610,7 @@ def import_product_photo(message: dict, chat_id: int, products: dict, db: sqlite
     admin.clear_editor(db, chat_id)
     if not caption:
         if message.get("photo") and not message.get("media_group_id"):
-            send(chat_id, "Add a caption with the product name and one price (e.g. 110 DH) to the photo, then send it again. For several photos, send them together as one album.")
+            send(chat_id, "أضف اسم المنتج وسعرًا واحدًا (مثل ١١٠ درهم) إلى وصف الصورة وأعد إرسالها. أرسل الصور المتعددة معًا كألبوم.")
         return
     origin = message.get("forward_origin")
     if origin:
@@ -628,19 +630,19 @@ def import_product_photo(message: dict, chat_id: int, products: dict, db: sqlite
     existing = db.execute("SELECT sku FROM product_imports WHERE origin_key=?", (key,)).fetchone()
     if existing and existing["sku"] in products:
         sku = existing["sku"]
-        status = "Already imported"
+        status = "مستورد مسبقًا"
     else:
         try:
             name, description, price_dh = parse_product_caption(caption)
         except ValueError as exc:
-            send(chat_id, f"Could not import this product: {exc}\nEdit its caption and send it again.")
+            send(chat_id, f"تعذّر استيراد المنتج: {shop.error_message(exc)}\nعدّل الوصف وأعد الإرسال.")
             return
         sku = next_sku(products, db)
         product = {"sku": sku, "name": name, "description": description, "price_dh": price_dh}
         save_products({**products, sku: product})
         products[sku] = product
         db.execute("INSERT OR REPLACE INTO product_imports VALUES (?, ?)", (key, sku))
-        status = "Imported"
+        status = "تم الاستيراد"
     db.execute("INSERT OR REPLACE INTO source_imports VALUES (?, ?, ?)",
                (chat_id, message["message_id"], sku))
     if message.get("media_group_id"):
@@ -649,7 +651,7 @@ def import_product_photo(message: dict, chat_id: int, products: dict, db: sqlite
     db.commit()
     p = products[sku]
     send(chat_id, f"✅ {status}: {sku}\n{p['name']} — {p['price_dh']} DH\n"
-         f"Reply to the product photo (or any photo in its album) with /preview or /publish. You can also add the SKU: /publish {sku}.")
+         f"رد على صورة المنتج أو إحدى صور الألبوم بالأمر /preview أو /publish. يمكنك إضافة رمز المنتج: /publish {sku}.")
 
 
 def basket_rows(db, chat_id):
@@ -662,7 +664,7 @@ def basket_quote(chat_id, products, db):
     quantity = sum(row["quantity"] for row in rows)
     if not MIN_QUANTITY <= quantity <= 1000:
         send(chat_id, "السلة تحتاج من 10 إلى 1000 قطعة إجمالاً، ويمكنك خلط الموديلات.\n"
-             "Your basket needs 10–1000 pieces in total. Mix any models. /basket")
+             "لتعديل السلة: /basket")
         return None
     items = []
     for row in rows:
@@ -670,7 +672,7 @@ def basket_quote(chat_id, products, db):
         available = shop.stock(db, row["sku"])
         if not product or (available is not None and row["quantity"] > available):
             send(chat_id, f"{row['sku']}: المنتج غير متاح أو الكمية غير كافية.\n"
-                 "Item unavailable or insufficient stock. Edit your basket: /basket")
+                 "لتعديل السلة: /basket")
             return None
         items.append({**row, "name": product["name"], "price_dh": product["price_dh"]})
     return items
@@ -678,23 +680,23 @@ def basket_quote(chat_id, products, db):
 
 def show_basket(chat_id, products, db):
     rows = basket_rows(db, chat_id)
-    lines = ["🧺 السلة | Basket", "الحد الأدنى 10 قطع إجمالاً من أي موديلات. | Minimum: 10 pieces total."]
+    lines = ["🧺 السلة", "الحد الأدنى 10 قطع إجمالاً من أي موديلات."]
     buttons = []
     total = 0
     for row in rows:
         p = products.get(row["sku"])
-        label = p["name"][:60] if p else row["sku"] + " (unavailable)"
+        label = p["name"][:60] if p else row["sku"] + " (غير متاح)"
         subtotal = p["price_dh"] * row["quantity"] if p else 0
         total += subtotal
         lines.append(f"{label} × {row['quantity']} — {subtotal} DH")
         buttons.append([(f"✏️ {label}", f"basket:edit:{row['sku']}"),
-                        ("✖ Remove", f"basket:remove:{row['sku']}")])
-    lines.append(f"\n{sum(row['quantity'] for row in rows)} قطعة | pieces — {total} DH (بدون التوصيل | excluding delivery)")
+                        ("✖ حذف", f"basket:remove:{row['sku']}")])
+    lines.append(f"\n{sum(row['quantity'] for row in rows)} قطعة — {total} DH (بدون التوصيل)")
     if rows:
-        buttons.append([("✅ إتمام الطلب | Checkout", "basket:checkout")])
+        buttons.append([("✅ إتمام الطلب", "basket:checkout")])
     else:
-        lines.append("السلة فارغة | Your basket is empty.")
-    buttons.append([("🛍 متابعة التسوق | Continue shopping", "basket:shop")])
+        lines.append("السلة فارغة")
+    buttons.append([("🛍 متابعة التسوق", "basket:shop")])
     send_order(db, chat_id, "\n".join(lines), buttons)
 
 
@@ -711,7 +713,7 @@ def basket_callback(chat_id, command, products, db):
         show_basket(chat_id, products, db)
     elif command == "basket:checkout":
         if not ADMIN_CHAT_ID:
-            send(chat_id, "Ordering is temporarily unavailable.")
+            send(chat_id, "الطلب غير متاح مؤقتًا.")
             return True
         items = basket_quote(chat_id, products, db)
         if items:
@@ -738,17 +740,17 @@ def basket_callback(chat_id, command, products, db):
             source = "catalog"
         existing = db.execute("SELECT * FROM basket_items WHERE chat_id=? AND sku=?", (chat_id, sku)).fetchone()
         if sku not in products:
-            send(chat_id, "Product unavailable. Remove it from /basket.")
+            send(chat_id, "المنتج غير متاح. احذفه من /basket.")
             return True
         if not existing and len(basket_rows(db, chat_id)) >= 20:
-            send(chat_id, "Maximum 20 different models per basket. Edit /basket first.")
+            send(chat_id, "الحد الأقصى ٢٠ موديلًا في السلة. عدّل /basket أولًا.")
             return True
         put_session(db, chat_id, "basket_quantity", {"sku": sku, "source": existing["source"] if existing else source})
         send_order(db, chat_id, f"{products[sku]['name']}\n"
-                   f"الكمية الحالية | Current quantity: {existing['quantity'] if existing else 0}\n"
+                   f"الكمية الحالية: {existing['quantity'] if existing else 0}\n"
                    "أدخل الكمية لهذا الموديل (1–1000)، أو 0 للحذف.\n"
-                   "Enter the new quantity for this model (1–1000), or 0 to remove.\n"
-                   "يمكنك خلط الموديلات للوصول إلى 10 قطع. | Mix models to reach 10 pieces.")
+                   "\n"
+                   "يمكنك خلط الموديلات للوصول إلى 10 قطع.")
     return True
 
 
@@ -758,7 +760,7 @@ def confirm_basket(chat_id, data, products, db):
         return
     if data["items"] != items:
         data["items"] = items
-        send_order(db, chat_id, "Basket details changed. Please review and confirm again.")
+        send_order(db, chat_id, "تغيرت تفاصيل السلة. راجعها وأكد مجددًا.")
         review_order(chat_id, None, data, db)
         return
     quantity = sum(item["quantity"] for item in items)
@@ -780,7 +782,7 @@ def confirm_basket(chat_id, data, products, db):
         send_order_audio(ADMIN_CHAT_ID, order)
     except RuntimeError as exc:
         print(f"Admin notification failed for order #{order['id']}: {exc}", file=sys.stderr)
-    send(chat_id, f"✅ تم تسجيل طلبك #{order['id']}.\nOrder saved. View your order: /orders")
+    send(chat_id, f"✅ تم تسجيل طلبك #{order['id']}.\nلمتابعة طلبك: /orders")
     clean_order_chat(db, chat_id)
 
 
@@ -821,7 +823,7 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
         remember_order_message(db, chat_id, message["message_id"])
         return
     if raw == "/id":
-        send(chat_id, f"Your chat ID: {chat_id}")
+        send(chat_id, f"معرّف محادثتك: {chat_id}")
         return
     if raw == "/cancel":
         admin.clear_editor(db, chat_id)
@@ -854,29 +856,29 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
         parts = raw.split()
         original = message.get("reply_to_message")
         if not original or len(parts) not in (1, 2):
-            send(chat_id, "Send the product photo with its caption first. Then reply to its photo with /preview or /publish. You can also add a SKU, e.g. /preview bv001.")
+            send(chat_id, "أرسل صورة المنتج مع وصفها أولًا. ثم رد عليها بالأمر /preview أو /publish. يمكنك إضافة رمز المنتج، مثل /preview bv001.")
             return
         imported_sku = imported_sku_for_reply(db, chat_id, original)
         sku = parts[1] if len(parts) == 2 else imported_sku
         if not sku or sku not in products:
-            send(chat_id, "No product found. Send the photo with a name and price in its caption first, or add its SKU to products.json.")
+            send(chat_id, "المنتج غير موجود. أرسل الصورة مع الاسم والسعر في وصفها، أو أضف المنتج إلى products.json.")
             return
         if imported_sku and sku != imported_sku:
-            send(chat_id, f"This product was imported as {imported_sku}. Use /preview {imported_sku} or /publish {imported_sku}.")
+            send(chat_id, f"تم استيراد المنتج بالرمز {imported_sku}. استخدم /preview {imported_sku} أو /publish {imported_sku}.")
             return
         source_id = original["message_id"]
         is_publish = parts[0] == "/publish"
         if not is_publish and parts[0] != "/preview":
             return
         if is_publish and not CHANNEL_ID:
-            send(chat_id, "Set CHANNEL_ID in .env, restart the bot, then try again.")
+            send(chat_id, "اضبط CHANNEL_ID في .env وأعد تشغيل البوت ثم حاول مجددًا.")
             return
         if original.get("media_group_id"):
             try:
                 publish_album(chat_id, str(original["media_group_id"]), sku, is_publish,
                               products, db, bot_username)
             except RuntimeError as exc:
-                send(chat_id, f"Could not {'publish' if is_publish else 'preview'} album: {exc}")
+                send(chat_id, f"تعذّر {'نشر' if is_publish else 'عرض'} الألبوم: {shop.error_message(exc)}")
             return
         destination = CHANNEL_ID if is_publish else chat_id
         if is_publish:
@@ -884,7 +886,7 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
                 WHERE source_chat_id=? AND source_message_id=? AND sku=? AND target_chat_id=?""",
                 (chat_id, source_id, sku, CHANNEL_ID)).fetchone()
             if prior:
-                send(chat_id, f"Already published this post as channel message #{prior['channel_message_id']}.")
+                send(chat_id, f"سبق نشر هذا المنشور في القناة برقم #{prior['channel_message_id']}.")
                 return
         try:
             caption, entities = product_post_caption(
@@ -898,16 +900,16 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
                 "reply_markup": json.dumps({"inline_keyboard": []}),
             })
         except RuntimeError as exc:
-            send(chat_id, f"Could not {'publish' if is_publish else 'preview'}: {exc}")
+            send(chat_id, f"تعذّر {'النشر' if is_publish else 'العرض'}: {shop.error_message(exc)}")
             return
         if is_publish:
             with db:
                 db.execute("""INSERT INTO published_posts VALUES (?, ?, ?, ?, ?)""",
                            (chat_id, source_id, sku, CHANNEL_ID, result["message_id"]))
                 shop.queue_arrival(db, sku)
-            send(chat_id, f"✅ Published to {CHANNEL_ID} with an Order now link (message #{result['message_id']}).")
+            send(chat_id, f"✅ نُشر في {CHANNEL_ID} مع رابط الطلب (الرسالة #{result['message_id']}).")
         else:
-            send(chat_id, "Preview above. Reply to the same original post with /publish " + sku + " when ready.")
+            send(chat_id, "المعاينة أعلاه. رد على المنشور الأصلي بالأمر /publish " + sku + " عندما تكون جاهزًا.")
         return
     if raw.split(maxsplit=1)[:1] == ["/orders"]:
         show_orders(chat_id, raw, db)
@@ -921,15 +923,15 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
             return
         parts = raw.split()
         if len(parts) != 3 or parts[1] not in products or not SOURCE_PATTERN.fullmatch(parts[2]):
-            send(chat_id, "Usage: /link SKU source\nExample: /link bv001 channel")
+            send(chat_id, "أرسل /link ثم رمز المنتج ثم رمز المصدر\nمثال: /link bv001 channel")
             return
         payload = f"p_{parts[1]}_{parts[2]}"
         if len(payload) > 64:
-            send(chat_id, "SKU and source are too long for a Telegram deep link.")
+            send(chat_id, "رمز المنتج والمصدر أطول من الحد المسموح لرابط تيليجرام.")
             return
         db.execute("INSERT OR IGNORE INTO issued_links (sku) VALUES (?)", (parts[1],))
         db.commit()
-        send(chat_id, f"Product link:\nhttps://t.me/{bot_username}?start={payload}")
+        send(chat_id, f"رابط المنتج:\nhttps://t.me/{bot_username}?start={payload}")
         return
     if raw.startswith("/"):
         send(chat_id, "اكتب /start لعرض المنتجات أو /cancel لإلغاء الطلب.")
@@ -950,7 +952,7 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
         elif raw and len(raw) <= 1000:
             data["description"] = raw
         else:
-            send_order(db, chat_id, "أرسل وصفًا حتى 1000 حرف أو رسالة صوتية. | Send text (up to 1000 characters) or audio.")
+            send_order(db, chat_id, "أرسل وصفًا حتى 1000 حرف أو رسالة صوتية.")
             return
         ask_order_note(chat_id, data, db)
         return
@@ -960,17 +962,17 @@ def handle_text(message: dict, products: dict, db: sqlite3.Connection, bot_usern
         return
     if step == "basket_quantity":
         if not value.isascii() or not value.isdigit() or not 0 <= int(value) <= 1000:
-            send_order(db, chat_id, "Enter a quantity from 1 to 1000, or 0 to remove.")
+            send_order(db, chat_id, "أدخل كمية من ١ إلى ١٠٠٠، أو ٠ للحذف.")
             return
         quantity = int(value)
         sku = data["sku"]
         available = shop.stock(db, sku)
         rows = basket_rows(db, chat_id)
         if quantity and (sku not in products or (available is not None and quantity > available)):
-            send_order(db, chat_id, "Product unavailable or insufficient stock. Enter another quantity or 0 to remove.")
+            send_order(db, chat_id, "المنتج غير متاح أو المخزون غير كافٍ. أدخل كمية أخرى أو ٠ للحذف.")
             return
         if quantity + sum(row["quantity"] for row in rows if row["sku"] != sku) > 1000:
-            send_order(db, chat_id, "Maximum 1000 pieces across the whole basket.")
+            send_order(db, chat_id, "الحد الأقصى ١٠٠٠ قطعة في السلة.")
             return
         with db:
             if quantity:
@@ -1038,16 +1040,37 @@ def next_detail(chat_id: int, data: dict, products: dict, db: sqlite3.Connection
 
 
 def note_summary(data):
-    return ("وصف الطلب | Order description: " + (data.get("description") or "—")
-            + ("\n🎤 رسالة صوتية مرفقة | Audio attached" if data.get("note_audio") else ""))
+    return ("وصف الطلب: " + (data.get("description") or "—")
+            + ("\n🎤 رسالة صوتية مرفقة" if data.get("note_audio") else ""))
 
 
-def ask_order_note(chat_id, data, db):
-    message = send_order(db, chat_id,
-        "وصف الطلب (اختياري): اكتب الألوان أو التفاصيل المطلوبة، أو أرسل رسالة صوتية. يمكنك إرسال الاثنين. النص أو الصوت الجديد يعوض السابق.\n"
-        "Order description (optional): send text, a voice message, or both. New text/audio replaces the previous one.\n\n"
-        + note_summary(data), [[("✅ متابعة / تخطي | Continue / Skip", "note:done")],
-                               [("🗑 مسح الوصف والصوت | Clear note", "note:clear")]])
+def ask_order_note(chat_id, data, db, mode=None):
+    has_note = bool(data.get("description") or data.get("note_audio"))
+    prompt = ("🎨 عندك ألوان أو تفاصيل خاصة؟ (اختياري)\n\n"
+              "🎤 أرسل رسالة صوتية بلا كتابة\n"
+              "✍️ أو اكتب التفاصيل في رسالة قصيرة\n\n"
+              "ما عندك تفاصيل؟ اضغط «تخطي» 👇")
+    if mode == "voice":
+        prompt = ("🎤 أرسل رسالة صوتية بالتفاصيل المطلوبة\n\n"
+                  "اضغط مطولًا على الميكروفون بجانب خانة الكتابة، وسجّل الألوان أو التفاصيل ثم أرسل الصوت.\n"
+                  "إذا ظهرت الكاميرا بدل الميكروفون، اضغط عليها مرة للتبديل إلى الصوت.\n\n"
+                  "يمكنك أيضًا إرفاق ملف صوتي أو كتابة رسالة.")
+    elif mode == "text":
+        prompt = ("✍️ اكتب الألوان أو التفاصيل المطلوبة هنا\n\n"
+                  "مثال: بغيت ٥ قطع بالأسود و٥ بالذهبي.\n"
+                  "رسالة قصيرة تكفي (حتى ١٠٠٠ حرف).")
+    if has_note:
+        prompt = ("✅ تم حفظ التفاصيل\n\n" + note_summary(data)
+                  + "\n\nيمكنك إضافة نص وصوت معًا. النص الجديد يعوض النص السابق، والصوت الجديد يعوض الصوت السابق.")
+        if mode:
+            prompt += ("\n\n🎤 سجّل رسالتك من الميكروفون بجانب خانة الكتابة وأرسلها."
+                       if mode == "voice" else "\n\n✍️ أرسل النص الجديد هنا (حتى ١٠٠٠ حرف).")
+    rows = [[("🎤 رسالة صوتية", "note:voice")],
+            [("✍️ كتابة التفاصيل", "note:text")],
+            [("✅ متابعة" if has_note else "⏭ تخطي، بدون تفاصيل", "note:done")]]
+    if has_note:
+        rows.append([("🗑 مسح التفاصيل والصوت", "note:clear")])
+    message = send_order(db, chat_id, prompt, rows)
     data["note_message_id"] = message["message_id"]
     put_session(db, chat_id, "description", data)
 
@@ -1057,7 +1080,7 @@ def send_order_audio(chat_id, order):
         audio = json.loads(order["note_audio_json"])
         api("sendVoice" if audio["kind"] == "voice" else "sendAudio",
             {"chat_id": chat_id, audio["kind"]: audio["file_id"],
-             "caption": f"🎤 Order #{order['id']} — {order['customer_name']}"})
+             "caption": f"🎤 طلب #{order['id']} — {order['customer_name']}"})
 
 
 def show_saved_details(chat_id: int, data: dict, db: sqlite3.Connection) -> None:
@@ -1077,13 +1100,13 @@ def show_saved_details(chat_id: int, data: dict, db: sqlite3.Connection) -> None
 def review_order(chat_id: int, p: dict, data: dict, db: sqlite3.Connection) -> None:
     if "items" in data:
         total = sum(item["price_dh"] * item["quantity"] for item in data["items"])
-        message = send_order(db, chat_id, "راجع طلبك | Review your order:\n\n"
+        message = send_order(db, chat_id, "راجع طلبك:\n\n"
             + admin.item_summary(data["items"])
-            + f"\n\nالمجموع بدون التوصيل | Total excluding delivery: {total} DH\n"
+            + f"\n\nالمجموع بدون التوصيل: {total} DH\n"
             + "\n".join(f"{label}: {data[field]}" for field, label in DETAIL_FIELDS.items())
-            + "\n\nبتأكيد الطلب، تُرسل بيانات التوصيل إلى البائع. | Confirm to send your delivery details to the seller.",
-            [[("✅ تأكيد الطلب | Confirm", "confirm"), ("❌ إلغاء", "cancel")],
-             [("✏️ تعديل بيانات التوصيل", "details:edit"), ("🧺 Edit basket", "basket:show")]])
+            + "\n\nبتأكيد الطلب، تُرسل بيانات التوصيل إلى البائع.",
+            [[("✅ تأكيد الطلب", "confirm"), ("❌ إلغاء", "cancel")],
+             [("✏️ تعديل بيانات التوصيل", "details:edit"), ("🧺 تعديل السلة", "basket:show")]])
         data["confirm_message_id"] = message["message_id"]
         put_session(db, chat_id, "confirm", data)
         return
@@ -1123,14 +1146,14 @@ def check_stock(chat_id: int, sku: str, quantity: int, products: dict, db: sqlit
 
 
 def order_message(order: sqlite3.Row) -> str:
-    return (f"🛒 طلب #{order['id']} ({order['status']})\n"
+    return (f"🛒 طلب #{order['id']} ({admin.STATUSES.get(order['status'], 'غير معروف')})\n"
             f"{admin.item_summary(admin.order_items(order))}\n"
             f"المجموع بدون التوصيل: {admin.order_total(order)} DH\n"
             f"الاسم: {order['customer_name']}\nالهاتف: {order['phone']}\n"
             f"المدينة: {order['city']}\nالعنوان: {order['address']}\n"
-            f"وصف الطلب | Order description: {order['description'] or '—'}\n"
-            + ("🎤 Audio attached\n" if order["note_audio_json"] else "")
-            + f"المصدر: {order['source']}\nالتاريخ (UTC): {order['created_at']}")
+            f"وصف الطلب: {order['description'] or '—'}\n"
+            + ("🎤 رسالة صوتية مرفقة\n" if order["note_audio_json"] else "")
+            + f"المصدر: { {'channel': 'القناة', 'catalog': 'الكتالوج', 'direct': 'مباشر', 'arrival': 'تنبيه الجديد', 'restock': 'تنبيه التوفر'}.get(order['source'], order['source'])}\nالتاريخ (التوقيت العالمي): {order['created_at']}")
 
 
 def delete_order(chat_id: int, command: str, db: sqlite3.Connection) -> None:
@@ -1140,7 +1163,7 @@ def delete_order(chat_id: int, command: str, db: sqlite3.Connection) -> None:
     parts = command.split()
     if (len(parts) != 2 or not re.fullmatch(r"[1-9][0-9]{0,18}", parts[1])
             or int(parts[1]) > 9223372036854775807):
-        send(chat_id, "Usage: /delete ORDER_NUMBER\nExample: /delete 2")
+        send(chat_id, "لحذف طلب: أرسل /delete ثم رقمه\nمثال: /delete 2")
         return
     order_id = int(parts[1])
     with db:
@@ -1156,11 +1179,11 @@ def delete_order(chat_id: int, command: str, db: sqlite3.Connection) -> None:
                     db.execute("UPDATE orders SET id=? WHERE id=?", (new_id, old_id))
             db.execute("UPDATE sqlite_sequence SET seq=? WHERE name='orders'", (len(remaining_ids),))
     if not removed:
-        send(chat_id, f"Order #{order_id} was not found. Use /orders to check the order number.")
+        send(chat_id, f"الطلب #{order_id} غير موجود. تحقق من رقمه عبر /orders.")
         return
-    send(chat_id, f"Deleted order #{order_id}. Remaining orders have been renumbered from 1.\n"
-         f"Next new order: #{len(remaining_ids) + 1}. Use /orders to check current numbers before deleting another order.\n"
-         "Previously sent confirmations still show their old numbers.")
+    send(chat_id, f"تم حذف الطلب #{order_id}. أُعيد ترقيم الطلبات المتبقية من ١.\n"
+         f"رقم الطلب القادم: #{len(remaining_ids) + 1}. تحقق من الأرقام الحالية عبر /orders قبل حذف طلب آخر.\n"
+         "رسائل التأكيد السابقة ما زالت تحمل الأرقام القديمة.")
 
 
 def show_orders(chat_id: int, command: str, db: sqlite3.Connection) -> None:
@@ -1208,7 +1231,7 @@ def handle_callback(callback: dict, products: dict, db: sqlite3.Connection) -> N
             if order:
                 send_order_audio(chat_id, order)
         return
-    if command in {"note:done", "note:edit", "note:clear"}:
+    if command in {"note:done", "note:edit", "note:clear", "note:voice", "note:text"}:
         current = session(db, chat_id)
         if not current:
             return
@@ -1226,6 +1249,8 @@ def handle_callback(callback: dict, products: dict, db: sqlite3.Connection) -> N
             data.pop("description", None)
             data.pop("note_audio", None)
             ask_order_note(chat_id, data, db)
+        elif command in {"note:voice", "note:text"} and step == "description":
+            ask_order_note(chat_id, data, db, mode=command.split(":")[1])
         return
     if command.startswith("view:"):
         sku = command[5:]
@@ -1296,7 +1321,7 @@ def handle_callback(callback: dict, products: dict, db: sqlite3.Connection) -> N
             put_session(db, chat_id, "quantity", data)
         return
     if data.get("quoted_price_dh") != p["price_dh"] or data.get("quoted_name") != p["name"]:
-        send_order(db, chat_id, "Product details changed. Please review the current price and confirm again.")
+        send_order(db, chat_id, "تغيرت تفاصيل المنتج. راجع السعر الحالي وأكد مجددًا.")
         review_order(chat_id, p, data, db)
         return
     with db:
